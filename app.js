@@ -18,7 +18,11 @@ const decodeBinary = (binStr) => {
 // =========================================================
 // CONFIGURAÇÕES DA API 
 // =========================================================
-const SPREADSHEET_ID = "1Fuhb3HMRzg2kEozkuREFNKYSXtqUCLhZWFFuWM-f3v4"; 
+const SPREADSHEET_ID = "1Fuhb3HMRzg2kEozkuREFNKYSXtqUCLhZWFFuWM-f3v4";
+const LOCAL_STORAGE_KEYS = {
+    auth: 'painel_contratos_auth_v1',
+    dataCache: 'painel_contratos_data_cache_v1'
+};
 
 // Chave de API em binário
 const BINARY_API_KEY = "01000001 01001001 01111010 01100001 01010011 01111001 01000011 01001011 01110010 01110110 01100001 01101011 01101011 01000010 01001000 00111001 01101100 00110100 01010111 01100010 01010001 01001011 01001110 01110111 01101010 01010000 00110010 01010011 01010000 01001101 01001001 01101110 01110011 01101110 01110100 01000001 01101010 01100011 01000001"; 
@@ -95,6 +99,42 @@ const formatLabelMultiLine = (text) => {
         return [lines[0], lines[1].substring(0, 15) + '...'];
     }
     return lines;
+};
+
+const getAdaptiveTickOptions = () => ({
+    autoSkip: true,
+    maxTicksLimit: 20,
+    maxRotation: 65,
+    minRotation: 0,
+    font: { size: 9 },
+    callback: function(value) {
+        const label = this.getLabelForValue(value);
+        return Array.isArray(label) ? label : formatLabelMultiLine(label);
+    }
+});
+
+const safeLocalStorageGet = (key) => {
+    try {
+        return localStorage.getItem(key);
+    } catch (e) {
+        return null;
+    }
+};
+
+const safeLocalStorageSet = (key, value) => {
+    try {
+        localStorage.setItem(key, value);
+    } catch (e) {
+        // localStorage indisponível ou bloqueado.
+    }
+};
+
+const safeLocalStorageRemove = (key) => {
+    try {
+        localStorage.removeItem(key);
+    } catch (e) {
+        // localStorage indisponível ou bloqueado.
+    }
 };
 
 // =========================================================
@@ -466,7 +506,7 @@ function DateInput({ label, value, onChange }) {
 // =========================================================
 // DASHBOARD MASTER
 // =========================================================
-function Dashboard() {
+function Dashboard({ onLogout }) {
     const [rawData, setRawData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [status, setStatus] = useState("A conectar à Google API v4...");
@@ -506,6 +546,14 @@ function Dashboard() {
         v_cancelado: {min:'', max:''}, p_cancelado: {min:'', max:''}, v_executado: {min:'', max:''}, p_executado: {min:'', max:''}
     };
     const [numFilters, setNumFilters] = useState(initialNumFilters);
+
+    const saveRowsCache = (rows, source) => {
+        safeLocalStorageSet(LOCAL_STORAGE_KEYS.dataCache, JSON.stringify({
+            source,
+            updatedAt: new Date().toISOString(),
+            values: rows
+        }));
+    };
 
     const clearAllFilters = () => {
         setFFiscal([]); setFGestor([]); setFSecLog([]); setFContrato([]); setFFornecedor([]);
@@ -624,6 +672,7 @@ function Dashboard() {
                 skipEmptyLines: true,
                 complete: (res) => {
                     processData(res.data);
+                    saveRowsCache(res.data, 'manual_csv');
                     setStatus("Offline - Dados Carregados Manualmente via CSV");
                 }
             });
@@ -640,12 +689,26 @@ function Dashboard() {
             if (!json.values) throw new Error("A aba retornou vazia ou o intervalo é inválido.");
 
             processData(json.values);
+            saveRowsCache(json.values, 'google_api');
             setStatus("Online - Conectado via Google Sheets API v4");
-            
-        } catch (error) { 
+
+        } catch (error) {
             console.error("Falha no acesso:", error.message);
-            setStatus(`Acesso à API falhou. Por favor, verifique a Chave/ID ou faça a Carga Manual.`); 
-            setLoading(false); 
+            const cached = safeLocalStorageGet(LOCAL_STORAGE_KEYS.dataCache);
+            if (cached) {
+                try {
+                    const parsedCache = JSON.parse(cached);
+                    if (parsedCache && parsedCache.values && parsedCache.values.length) {
+                        processData(parsedCache.values);
+                        setStatus(`Offline - dados em cache (${parsedCache.source || 'origem desconhecida'}) de ${new Date(parsedCache.updatedAt).toLocaleString('pt-BR')}`);
+                        return;
+                    }
+                } catch (e) {
+                    // cache corrompido, segue fluxo de erro.
+                }
+            }
+            setStatus(`Acesso à API falhou. Por favor, verifique a Chave/ID ou faça a Carga Manual.`);
+            setLoading(false);
         }
     };
 
@@ -730,6 +793,15 @@ function Dashboard() {
         qtdFiscais: new Set(filteredData.map(d => d.fiscal)).size
     }), [filteredData]);
 
+    const tableTotals = useMemo(() => ({
+        qtdContratos: filteredData.length,
+        empenhado: filteredData.reduce((acc, curr) => acc + curr.v_empenhado, 0),
+        liquidado: filteredData.reduce((acc, curr) => acc + curr.v_liquidado, 0),
+        pago: filteredData.reduce((acc, curr) => acc + curr.v_pago, 0),
+        bloqueado: filteredData.reduce((acc, curr) => acc + curr.v_bloqueado, 0),
+        cancelado: filteredData.reduce((acc, curr) => acc + curr.v_cancelado, 0)
+    }), [filteredData]);
+
     const getChartData = (keyName) => {
         const map = {};
         filteredData.forEach(item => {
@@ -773,6 +845,40 @@ function Dashboard() {
         
         return arr.slice(0, 20); 
     }, [filteredData, contratoSort]);
+
+    const contratosPorAnoData = useMemo(() => {
+        const mapByYear = {};
+        filteredData.forEach(item => {
+            const anoInicio = item.dtInicVal ? new Date(item.dtInicVal).getFullYear() : null;
+            const anoFim = item.dtFimVal ? new Date(item.dtFimVal).getFullYear() : null;
+
+            if (anoInicio) {
+                if (!mapByYear[anoInicio]) {
+                    mapByYear[anoInicio] = { iniciados: new Set(), encerrados: new Set(), empenhadoInicio: 0 };
+                }
+                if (!mapByYear[anoInicio].iniciados.has(item.contrato)) {
+                    mapByYear[anoInicio].iniciados.add(item.contrato);
+                    mapByYear[anoInicio].empenhadoInicio += item.v_empenhado || 0;
+                }
+            }
+            if (anoFim) {
+                if (!mapByYear[anoFim]) {
+                    mapByYear[anoFim] = { iniciados: new Set(), encerrados: new Set(), empenhadoInicio: 0 };
+                }
+                mapByYear[anoFim].encerrados.add(item.contrato);
+            }
+        });
+
+        return Object.keys(mapByYear)
+            .map(Number)
+            .sort((a, b) => a - b)
+            .map((year) => ({
+                year,
+                qtdIniciados: mapByYear[year].iniciados.size,
+                qtdEncerrados: mapByYear[year].encerrados.size,
+                valorEmpenhado: mapByYear[year].empenhadoInicio
+            }));
+    }, [filteredData]);
 
     const handleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc' }));
 
@@ -884,13 +990,19 @@ function Dashboard() {
                         ● {status}
                     </p>
                 </div>
-                <div className="flex gap-2 items-center bg-white px-4 py-2 rounded-lg border shadow-sm">
+                <div className="flex gap-2 items-center bg-white px-4 py-2 rounded-lg border shadow-sm flex-wrap justify-end">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Carga Manual (CSV):</span>
                     <input type="file" accept=".csv" onChange={(e) => {
                         const r = new FileReader();
                         r.onload = (ev) => loadData(ev.target.result);
                         r.readAsText(e.target.files[0]);
                     }} className="text-xs cursor-pointer text-blue-600 font-bold w-[200px]" />
+                    <button
+                        onClick={onLogout}
+                        className="text-[10px] font-black uppercase bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 transition shadow-sm"
+                    >
+                        Sair
+                    </button>
                 </div>
             </header>
 
@@ -1118,15 +1230,109 @@ function Dashboard() {
                                     }
                                 }
                             ]
-                        }} options={{ 
-                            indexAxis: 'x', 
-                            responsive: true, 
+                        }} options={{
+                            indexAxis: 'x',
+                            responsive: true,
                             maintainAspectRatio: false,
                             plugins: { tooltip: getFullTooltipFornecedor(fornecedorChartData), datalabels: { display: false } },
-                            scales: { 
-                                x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } } },
-                                y: { type: 'linear', position: 'left', ticks: { callback: v => shortenNumber(v) } }, 
-                                y1: { type: 'linear', position: 'right', grid: { display: false } } 
+                            scales: {
+                                x: { ticks: getAdaptiveTickOptions() },
+                                y: { type: 'linear', position: 'left', ticks: { callback: v => shortenNumber(v) } },
+                                y1: { type: 'linear', position: 'right', grid: { display: false } }
+                            }
+                        }} />
+                    </div>
+                </div>
+            </div>
+
+            <div className="max-w-[1600px] mx-auto mb-10">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <h3 className="text-xs font-black text-slate-800 uppercase mb-4">
+                        Contratos Iniciados/Encerrados por Ano e Valor Empenhado
+                    </h3>
+                    <div className="h-[360px]">
+                        <ChartComponent id="contratosAnoChart" type="bar" data={{
+                            labels: contratosPorAnoData.map(d => d.year.toString()),
+                            datasets: [
+                                {
+                                    label: 'Qtd. Iniciados',
+                                    data: contratosPorAnoData.map(d => d.qtdIniciados),
+                                    backgroundColor: '#22c55e',
+                                    yAxisID: 'y',
+                                    borderRadius: 4,
+                                    datalabels: {
+                                        display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                                        color: '#14532d',
+                                        rotation: 270,
+                                        anchor: 'end',
+                                        align: 'start',
+                                        offset: 2,
+                                        font: { family: 'Outfit', size: 10, weight: '700' },
+                                        formatter: (v) => v.toLocaleString('pt-BR')
+                                    }
+                                },
+                                {
+                                    label: 'Qtd. Encerrados',
+                                    data: contratosPorAnoData.map(d => d.qtdEncerrados),
+                                    backgroundColor: '#f97316',
+                                    yAxisID: 'y',
+                                    borderRadius: 4,
+                                    datalabels: {
+                                        display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                                        color: '#9a3412',
+                                        rotation: 270,
+                                        anchor: 'end',
+                                        align: 'start',
+                                        offset: 2,
+                                        font: { family: 'Outfit', size: 10, weight: '700' },
+                                        formatter: (v) => v.toLocaleString('pt-BR')
+                                    }
+                                },
+                                {
+                                    label: 'Valor Empenhado (Início Vigência)',
+                                    data: contratosPorAnoData.map(d => d.valorEmpenhado),
+                                    backgroundColor: '#3b82f6',
+                                    yAxisID: 'y2',
+                                    borderRadius: 4,
+                                    datalabels: {
+                                        display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                                        color: '#1e3a8a',
+                                        rotation: 270,
+                                        anchor: 'end',
+                                        align: 'start',
+                                        offset: 2,
+                                        font: { family: 'Outfit', size: 10, weight: '700' },
+                                        formatter: (v) => shortenNumber(v)
+                                    }
+                                }
+                            ]
+                        }} options={{
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        title: (items) => `Ano: ${items[0].label}`,
+                                        label: (context) => {
+                                            const base = `${context.dataset.label}: `;
+                                            if (context.dataset.label.includes('Qtd.')) return base + context.raw.toLocaleString('pt-BR');
+                                            return base + formatBRL(context.raw);
+                                        }
+                                    },
+                                    bodyFont: { family: 'Outfit' },
+                                    titleFont: { family: 'Outfit' }
+                                },
+                                datalabels: { display: false }
+                            },
+                            scales: {
+                                x: { title: { display: true, text: 'Ano' } },
+                                y: { title: { display: true, text: 'Quantidade de Contratos' }, beginAtZero: true },
+                                y2: {
+                                    title: { display: true, text: 'Valor Empenhado' },
+                                    position: 'right',
+                                    grid: { display: false },
+                                    ticks: { callback: v => shortenNumber(v) }
+                                }
                             }
                         }} />
                     </div>
@@ -1205,17 +1411,17 @@ function Dashboard() {
                                     }
                                 }
                             ]
-                        }} options={{ 
-                            indexAxis: 'x', 
-                            responsive: true, 
+                        }} options={{
+                            indexAxis: 'x',
+                            responsive: true,
                             maintainAspectRatio: false,
                             plugins: { tooltip: getFullTooltipContrato(contratoChartData), datalabels: { display: false } },
-                            scales: { 
-                                x: { ticks: { maxRotation: 45, minRotation: 45, font: { size: 9 } } },
-                                y_perc: { 
-                                    type: 'linear', 
-                                    position: 'left', 
-                                    ticks: { callback: v => (v * 100).toFixed(0) + '%' } 
+                            scales: {
+                                x: { ticks: getAdaptiveTickOptions() },
+                                y_perc: {
+                                    type: 'linear',
+                                    position: 'left',
+                                    ticks: { callback: v => (v * 100).toFixed(0) + '%' }
                                 }, 
                                 y_val: { 
                                     type: 'linear', 
@@ -1232,8 +1438,10 @@ function Dashboard() {
             {/* TABELA DE DADOS MASTER */}
             <div className="max-w-[1600px] mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
                 <div className="bg-slate-800 px-4 py-3 flex justify-between items-center flex-wrap gap-2">
-                    <h3 className="text-white text-xs font-black tracking-widest uppercase">Detalhamento Financeiro dos Contratos</h3>
-                    
+                    <h3 className="text-white text-xs font-black tracking-widest uppercase">
+                        Detalhamento Financeiro dos Contratos ({tableTotals.qtdContratos.toLocaleString('pt-BR')})
+                    </h3>
+
                     <div className="flex gap-2">
                         <button onClick={exportToExcel} className="text-[10px] font-bold bg-green-600 hover:bg-green-500 text-white px-3 py-1 rounded shadow-sm transition">
                             EXCEL
@@ -1329,6 +1537,22 @@ function Dashboard() {
                                 </tr>
                             ))}
                         </tbody>
+                        <tfoot className="sticky bottom-0 z-10">
+                            <tr className="bg-slate-100 border-t-2 border-slate-300 font-black text-[10px] text-slate-700">
+                                <td className="p-2 text-left" colSpan="10">TOTAIS</td>
+                                <td className="p-2 text-right bg-blue-50">{formatBRL(tableTotals.empenhado)}</td>
+                                <td className="p-2 text-right bg-amber-50">{formatBRL(tableTotals.liquidado)}</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                                <td className="p-2 text-right bg-emerald-50">{formatBRL(tableTotals.pago)}</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                                <td className="p-2 text-right bg-rose-50">{formatBRL(tableTotals.bloqueado)}</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                                <td className="p-2 text-right bg-red-50">{formatBRL(tableTotals.cancelado)}</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                                <td className="p-2 text-right bg-slate-50">—</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             </div>
@@ -1337,7 +1561,7 @@ function Dashboard() {
 }
 
 function App() {
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
+    const [isAuthenticated, setIsAuthenticated] = useState(() => safeLocalStorageGet(LOCAL_STORAGE_KEYS.auth) === 'true');
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
@@ -1363,10 +1587,18 @@ function App() {
 
         if (users[inputUser] && users[inputUser] === inputPass) {
             setIsAuthenticated(true);
+            safeLocalStorageSet(LOCAL_STORAGE_KEYS.auth, 'true');
             setError("");
         } else {
             setError("Credenciais inválidas. Verifique o usuário e a senha.");
         }
+    };
+
+    const handleLogout = () => {
+        safeLocalStorageRemove(LOCAL_STORAGE_KEYS.auth);
+        setIsAuthenticated(false);
+        setPassword("");
+        setError("");
     };
 
     if (!isAuthenticated) {
@@ -1416,7 +1648,7 @@ function App() {
         );
     }
 
-    return <Dashboard />;
+    return <Dashboard onLogout={handleLogout} />;
 }
 
 ReactDOM.render(<App />, document.getElementById('root'));
