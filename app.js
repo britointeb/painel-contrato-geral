@@ -129,6 +129,14 @@ const safeLocalStorageSet = (key, value) => {
     }
 };
 
+const safeLocalStorageRemove = (key) => {
+    try {
+        localStorage.removeItem(key);
+    } catch (e) {
+        // localStorage indisponível ou bloqueado.
+    }
+};
+
 // =========================================================
 // CONFIGURAÇÕES GLOBAIS DE GRÁFICOS
 // =========================================================
@@ -498,7 +506,7 @@ function DateInput({ label, value, onChange }) {
 // =========================================================
 // DASHBOARD MASTER
 // =========================================================
-function Dashboard() {
+function Dashboard({ onLogout }) {
     const [rawData, setRawData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [status, setStatus] = useState("A conectar à Google API v4...");
@@ -982,13 +990,19 @@ function Dashboard() {
                         ● {status}
                     </p>
                 </div>
-                <div className="flex gap-2 items-center bg-white px-4 py-2 rounded-lg border shadow-sm">
+                <div className="flex gap-2 items-center bg-white px-4 py-2 rounded-lg border shadow-sm flex-wrap justify-end">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Carga Manual (CSV):</span>
                     <input type="file" accept=".csv" onChange={(e) => {
                         const r = new FileReader();
                         r.onload = (ev) => loadData(ev.target.result);
                         r.readAsText(e.target.files[0]);
                     }} className="text-xs cursor-pointer text-blue-600 font-bold w-[200px]" />
+                    <button
+                        onClick={onLogout}
+                        className="text-[10px] font-black uppercase bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 transition shadow-sm"
+                    >
+                        Sair
+                    </button>
                 </div>
             </header>
 
@@ -1234,7 +1248,7 @@ function Dashboard() {
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <h3 className="text-xs font-black text-slate-800 uppercase mb-4">
-                        Contratos Iniciados/Encerrados por Ano + Valor Empenhado
+                        Contratos Iniciados/Encerrados por Ano e Valor Empenhado
                     </h3>
                     <div className="h-[360px]">
                         <ChartComponent id="contratosAnoChart" type="bar" data={{
@@ -1245,27 +1259,71 @@ function Dashboard() {
                                     data: contratosPorAnoData.map(d => d.qtdIniciados),
                                     backgroundColor: '#22c55e',
                                     yAxisID: 'y',
-                                    borderRadius: 4
+                                    borderRadius: 4,
+                                    datalabels: {
+                                        display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                                        color: '#14532d',
+                                        rotation: 270,
+                                        anchor: 'end',
+                                        align: 'start',
+                                        offset: 2,
+                                        font: { family: 'Outfit', size: 10, weight: '700' },
+                                        formatter: (v) => v.toLocaleString('pt-BR')
+                                    }
                                 },
                                 {
                                     label: 'Qtd. Encerrados',
                                     data: contratosPorAnoData.map(d => d.qtdEncerrados),
                                     backgroundColor: '#f97316',
                                     yAxisID: 'y',
-                                    borderRadius: 4
+                                    borderRadius: 4,
+                                    datalabels: {
+                                        display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                                        color: '#9a3412',
+                                        rotation: 270,
+                                        anchor: 'end',
+                                        align: 'start',
+                                        offset: 2,
+                                        font: { family: 'Outfit', size: 10, weight: '700' },
+                                        formatter: (v) => v.toLocaleString('pt-BR')
+                                    }
                                 },
                                 {
                                     label: 'Valor Empenhado (Início Vigência)',
                                     data: contratosPorAnoData.map(d => d.valorEmpenhado),
                                     backgroundColor: '#3b82f6',
                                     yAxisID: 'y2',
-                                    borderRadius: 4
+                                    borderRadius: 4,
+                                    datalabels: {
+                                        display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                                        color: '#1e3a8a',
+                                        rotation: 270,
+                                        anchor: 'end',
+                                        align: 'start',
+                                        offset: 2,
+                                        font: { family: 'Outfit', size: 10, weight: '700' },
+                                        formatter: (v) => shortenNumber(v)
+                                    }
                                 }
                             ]
                         }} options={{
                             responsive: true,
                             maintainAspectRatio: false,
-                            plugins: { tooltip: tooltipCallback, datalabels: { display: false } },
+                            plugins: {
+                                tooltip: {
+                                    callbacks: {
+                                        title: (items) => `Ano: ${items[0].label}`,
+                                        label: (context) => {
+                                            const base = `${context.dataset.label}: `;
+                                            if (context.dataset.label.includes('Qtd.')) return base + context.raw.toLocaleString('pt-BR');
+                                            return base + formatBRL(context.raw);
+                                        }
+                                    },
+                                    bodyFont: { family: 'Outfit' },
+                                    titleFont: { family: 'Outfit' }
+                                },
+                                datalabels: { display: false }
+                            },
                             scales: {
                                 x: { title: { display: true, text: 'Ano' } },
                                 y: { title: { display: true, text: 'Quantidade de Contratos' }, beginAtZero: true },
@@ -1396,13 +1454,6 @@ function Dashboard() {
                         </button>
                     </div>
                 </div>
-                <div className="totals-strip">
-                    <span><strong>Empenhado:</strong> {formatBRL(tableTotals.empenhado)}</span>
-                    <span><strong>Liquidado:</strong> {formatBRL(tableTotals.liquidado)}</span>
-                    <span><strong>Pago:</strong> {formatBRL(tableTotals.pago)}</span>
-                    <span><strong>Bloqueado:</strong> {formatBRL(tableTotals.bloqueado)}</span>
-                    <span><strong>Cancelado:</strong> {formatBRL(tableTotals.cancelado)}</span>
-                </div>
                 <div className="overflow-x-auto h-[600px]">
                     <table className="w-full text-left text-[10px] border-collapse relative" style={{ tableLayout: 'fixed', minWidth: '1900px' }}>
                         <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 shadow-sm z-10">
@@ -1486,6 +1537,22 @@ function Dashboard() {
                                 </tr>
                             ))}
                         </tbody>
+                        <tfoot className="sticky bottom-0 z-10">
+                            <tr className="bg-slate-100 border-t-2 border-slate-300 font-black text-[10px] text-slate-700">
+                                <td className="p-2 text-left" colSpan="10">TOTAIS</td>
+                                <td className="p-2 text-right bg-blue-50">{formatBRL(tableTotals.empenhado)}</td>
+                                <td className="p-2 text-right bg-amber-50">{formatBRL(tableTotals.liquidado)}</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                                <td className="p-2 text-right bg-emerald-50">{formatBRL(tableTotals.pago)}</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                                <td className="p-2 text-right bg-rose-50">{formatBRL(tableTotals.bloqueado)}</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                                <td className="p-2 text-right bg-red-50">{formatBRL(tableTotals.cancelado)}</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                                <td className="p-2 text-right bg-slate-50">—</td>
+                                <td className="p-2 text-center bg-slate-50">—</td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             </div>
@@ -1525,6 +1592,13 @@ function App() {
         } else {
             setError("Credenciais inválidas. Verifique o usuário e a senha.");
         }
+    };
+
+    const handleLogout = () => {
+        safeLocalStorageRemove(LOCAL_STORAGE_KEYS.auth);
+        setIsAuthenticated(false);
+        setPassword("");
+        setError("");
     };
 
     if (!isAuthenticated) {
@@ -1574,7 +1648,7 @@ function App() {
         );
     }
 
-    return <Dashboard />;
+    return <Dashboard onLogout={handleLogout} />;
 }
 
 ReactDOM.render(<App />, document.getElementById('root'));
