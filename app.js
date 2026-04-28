@@ -6,6 +6,7 @@ if (window.ChartDataLabels) {
     Chart.defaults.set('plugins.datalabels', { display: false });
 }
 
+// Plugin para linha vertical
 const customLinePlugin = {
     id: 'customLinePlugin',
     afterDatasetsDraw: (chart) => {
@@ -31,6 +32,36 @@ const customLinePlugin = {
 };
 Chart.register(customLinePlugin);
 
+// Função global para gerar um preenchimento achurado em canvas (usado na barra Liquidado)
+const patternCache = {};
+const getHatchPattern = (color) => {
+    if (patternCache[color]) return patternCache[color];
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 8;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.fillRect(0, 0, 8, 8);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, 8);
+    ctx.lineTo(8, 0);
+    ctx.stroke();
+    patternCache[color] = ctx.createPattern(canvas, 'repeat');
+    return patternCache[color];
+};
+
+// Lógica de Cores Semânticas das Barras de Execução/Liquidação
+const getSemanticColor = (p_value) => {
+    if (p_value >= 0.999) return '#22c55e'; // Verde
+    if (p_value >= 0.5) return '#eab308';   // Amarelo
+    return '#ef4444';                       // Vermelho
+};
+
+// Paleta base para Pizzas (Até 10 cores, a última geralmente será "OUTROS")
+const pieColors = ['#3b82f6', '#eab308', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#14b8a6', '#f43f5e', '#6366f1', '#94a3b8'];
+
 const decodeBinary = (binStr) => {
     try {
         if (!binStr) return '';
@@ -41,7 +72,15 @@ const decodeBinary = (binStr) => {
     } catch(e) { return ''; }
 };
 
-const normalizeStr = (s) => s ? s.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim() : "";
+// Normalizador Extremo: Destrói acentos, espaços, _ e -, mantendo apenas letras, números e '%' para comparação perfeita.
+const normalizeStr = (str) => {
+    if (!str) return "";
+    return str.toString()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/[^a-z0-9%]/g, '');
+};
 
 const SPREADSHEET_ID = "1Fuhb3HMRzg2kEozkuREFNKYSXtqUCLhZWFFuWM-f3v4"; 
 const BINARY_API_KEY = "01000001 01001001 01111010 01100001 01010011 01111001 01000011 01001011 01110010 01110110 01100001 01101011 01101011 01000010 01001000 00111001 01101100 00110100 01010111 01100010 01010001 01001011 01001110 01110111 01101010 01010000 00110010 01010011 01010000 01001101 01001001 01101110 01110011 01101110 01110100 01000001 01101010 01100011 01000001"; 
@@ -253,6 +292,10 @@ const getFullTooltipContrato = (dataArray) => ({
                 }
             } else {
                 label += formatBRL(context.raw);
+                if (context.dataset.label === 'Valor Empenhado') {
+                    const item = dataArray[context.dataIndex];
+                    label += `\nGlobal: ${formatBRL(item.v_global)}`;
+                }
             }
             return label;
         }
@@ -347,7 +390,7 @@ const ChartComponent = ({ type, data, options, id }) => {
     return <canvas ref={canvasRef}></canvas>;
 };
 
-function KPICard({ title, value, subValue, color, isCurrency }) {
+function KPICard({ title, value, subValue, diffValue, diffLabel, color, isCurrency }) {
     const colors = { 
         slate: "border-slate-800 text-slate-800", 
         blue: "border-blue-500 text-blue-700", 
@@ -363,6 +406,11 @@ function KPICard({ title, value, subValue, color, isCurrency }) {
             <h3 className="text-[10px] font-black uppercase tracking-widest opacity-50 mb-1 truncate" title={title}>{title}</h3>
             <div className="flex flex-col w-full min-w-0">
                 <AutoFitText text={mainText} className="font-black text-2xl tracking-tight" />
+                {diffValue !== undefined && (
+                    <span className="text-[10px] font-bold text-red-500 mt-1 truncate" title={`${diffLabel}: ${formatBRL(diffValue)}`}>
+                        {diffLabel}: {formatBRL(diffValue)}
+                    </span>
+                )}
                 {subValue !== undefined && (
                     <span className="text-[10px] font-bold opacity-70 mt-1">{formatPercentBR(subValue)} do Empenhado</span>
                 )}
@@ -584,7 +632,7 @@ function Dashboard() {
                 gestor: (getVal(["GESTOR_TITULAR"]) || "N/I").toUpperCase(),
                 sec_log: (getVal(["SEC_LOG"]) || "N/I").toUpperCase(),
                 modalidade: (getVal(["Modalidade da Compra"]) || "N/I").toUpperCase(),
-                compra: (getVal(["Número da Compra", "Numero Compra", "Compra"], ["licitacao", "compra"]) || "N/I").toUpperCase(),
+                compra: (getVal(["Número da Compra", "Numero da Compra", "Número Compra", "Numero Compra"]) || "N/I").toUpperCase(),
                 
                 data_inic: getVal(["Vig. Início", "Vigencia Inicio"]), data_fim: getVal(["Vig. Fim", "Vigencia Fim"]),
                 dtInicVal: dtInicParsed ? dtInicParsed.getTime() : 0, dtFimVal: dtFimParsed ? dtFimParsed.getTime() : 0,
@@ -704,19 +752,50 @@ function Dashboard() {
         };
     }, [filteredData]);
 
-    const getChartData = (key) => {
+    // Motor para gerar dados das Pizzas com a categoria "OUTROS"
+    const getPieData = (key, metric = 'total') => {
         const map = {};
         filteredData.forEach(item => {
-            if (!map[item[key]]) map[item[key]] = { label: item[key], count: 0, total: 0 };
-            map[item[key]].count += 1; map[item[key]].total += item.v_empenhado;
+            const val = item[key] && item[key] !== "-" ? item[key] : "N/I";
+            if (!map[val]) map[val] = { label: val, count: 0, total: 0 };
+            map[val].count += 1; 
+            map[val].total += item.v_empenhado;
+        });
+        let sorted = Object.values(map).sort((a, b) => b[metric] - a[metric]);
+        if (sorted.length > 10) {
+            const top9 = sorted.slice(0, 9);
+            const others = sorted.slice(9).reduce((acc, curr) => {
+                acc.count += curr.count;
+                acc.total += curr.total;
+                return acc;
+            }, { label: "OUTROS", count: 0, total: 0 });
+            return [...top9, others];
+        }
+        return sorted;
+    };
+
+    const getChartData = (keyName) => {
+        const map = {};
+        filteredData.forEach(item => {
+            const k = item[keyName];
+            if (!map[k]) map[k] = { label: k, count: 0, total: 0 };
+            map[k].count += 1;
+            map[k].total += item.v_empenhado;
         });
         return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 10);
     };
 
     const gestorData = getChartData('gestor');
     const fiscalData = getChartData('fiscal');
-    const modData = getChartData('modalidade');
-    const secData = getChartData('sec_log');
+
+    const modDataV = getPieData('modalidade', 'total');
+    const modDataQ = getPieData('modalidade', 'count');
+    const secDataV = getPieData('sec_log', 'total');
+    const secDataQ = getPieData('sec_log', 'count');
+    const compraDataV = getPieData('compra', 'total');
+    const compraDataQ = getPieData('compra', 'count');
+    const fornPieDataV = getPieData('fornecedor', 'total');
+    const fornPieDataQ = getPieData('fornecedor', 'count');
 
     const fornecedorChartData = useMemo(() => {
         const map = {};
@@ -849,8 +928,8 @@ function Dashboard() {
             </div>
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
                 <KPICard title="Empenhado" value={kpis.emp} color="blue" isCurrency={true} />
-                <KPICard title="Liquidado" value={kpis.liq} subValue={kpis.pLiq} color="amber" isCurrency={true} />
-                <KPICard title="Pago" value={kpis.pag} subValue={kpis.pPag} color="emerald" isCurrency={true} />
+                <KPICard title="Liquidado" value={kpis.liq} subValue={kpis.pLiq} diffLabel="Dif (Emp-Liq)" diffValue={kpis.emp - kpis.liq} color="amber" isCurrency={true} />
+                <KPICard title="Pago" value={kpis.pag} subValue={kpis.pPag} diffLabel="Dif (Liq-Pag)" diffValue={kpis.liq - kpis.pag} color="emerald" isCurrency={true} />
                 <KPICard title="Bloqueado" value={kpis.blo} subValue={kpis.pBlo} color="orange" isCurrency={true} />
                 <KPICard title="Cancelado" value={kpis.can} subValue={kpis.pCan} color="red" isCurrency={true} />
                 <KPICard title="Executado" value={kpis.exe} subValue={kpis.pExe} color="blue" isCurrency={true} />
@@ -862,10 +941,10 @@ function Dashboard() {
                     <ChartComponent id="gGestor" type="bar" data={{
                         labels: gestorData.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
-                            { label: 'Qtd', data: gestorData.map(d => d.count), backgroundColor: '#eab308', xAxisID: 'x1', borderRadius: 4,
+                            { label: 'Qtd. Contratos', data: gestorData.map(d => d.count), backgroundColor: '#eab308', xAxisID: 'x1', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             },
-                            { label: 'Empenhado', data: gestorData.map(d => d.total), backgroundColor: '#3b82f6', xAxisID: 'x', borderRadius: 4,
+                            { label: 'Valor Empenhado', data: gestorData.map(d => d.total), backgroundColor: '#3b82f6', xAxisID: 'x', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'left', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             }
                         ]
@@ -876,10 +955,10 @@ function Dashboard() {
                     <ChartComponent id="gFiscal" type="bar" data={{
                         labels: fiscalData.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
-                            { label: 'Qtd', data: fiscalData.map(d => d.count), backgroundColor: '#f97316', xAxisID: 'x1', borderRadius: 4,
+                            { label: 'Qtd. Contratos', data: fiscalData.map(d => d.count), backgroundColor: '#f97316', xAxisID: 'x1', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             },
-                            { label: 'Empenhado', data: fiscalData.map(d => d.total), backgroundColor: '#22c55e', xAxisID: 'x', borderRadius: 4,
+                            { label: 'Valor Empenhado', data: fiscalData.map(d => d.total), backgroundColor: '#22c55e', xAxisID: 'x', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'left', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             }
                         ]
@@ -887,22 +966,43 @@ function Dashboard() {
                 </div>
             </div>
 
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
+            {/* GRÁFICOS DE PIZZA (LINHA 1) */}
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
                     <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (Mod)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pModV" type="pie" data={{ labels: modData.map(d => d.label), datasets: [{ data: modData.map(d => d.total), backgroundColor: ['#3b82f6', '#eab308', '#22c55e', '#f97316', '#ef4444', '#8b5cf6'] }] }} options={getPieOptions()} /></div>
+                    <div className="w-full h-56"><ChartComponent id="pModV" type="pie" data={{ labels: modDataV.map(d => d.label), datasets: [{ label: 'Valor Empenhado', data: modDataV.map(d => d.total), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
                     <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Qtd. Contratos (Mod)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pModQ" type="pie" data={{ labels: modData.map(d => d.label), datasets: [{ data: modData.map(d => d.count), backgroundColor: ['#3b82f6', '#eab308', '#22c55e', '#f97316', '#ef4444', '#8b5cf6'] }] }} options={getPieOptions()} /></div>
+                    <div className="w-full h-56"><ChartComponent id="pModQ" type="pie" data={{ labels: modDataQ.map(d => d.label), datasets: [{ label: 'Qtd. Contratos', data: modDataQ.map(d => d.count), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
                     <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (SEC)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pSecV" type="pie" data={{ labels: secData.map(d => d.label), datasets: [{ data: secData.map(d => d.total), backgroundColor: ['#3b82f6', '#eab308', '#22c55e', '#f97316', '#ef4444', '#8b5cf6'] }] }} options={getPieOptions()} /></div>
+                    <div className="w-full h-56"><ChartComponent id="pSecV" type="pie" data={{ labels: secDataV.map(d => d.label), datasets: [{ label: 'Valor Empenhado', data: secDataV.map(d => d.total), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
                     <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Qtd. Contratos (SEC)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pSecQ" type="pie" data={{ labels: secData.map(d => d.label), datasets: [{ data: secData.map(d => d.count), backgroundColor: ['#3b82f6', '#eab308', '#22c55e', '#f97316', '#ef4444', '#8b5cf6'] }] }} options={getPieOptions()} /></div>
+                    <div className="w-full h-56"><ChartComponent id="pSecQ" type="pie" data={{ labels: secDataQ.map(d => d.label), datasets: [{ label: 'Qtd. Contratos', data: secDataQ.map(d => d.count), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
+                </div>
+            </div>
+
+            {/* GRÁFICOS DE PIZZA (LINHA 2) */}
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
+                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (Nr Compra)</h3>
+                    <div className="w-full h-56"><ChartComponent id="pCompV" type="pie" data={{ labels: compraDataV.map(d => d.label), datasets: [{ label: 'Valor Empenhado', data: compraDataV.map(d => d.total), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
+                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Qtd. Contratos (Nr Compra)</h3>
+                    <div className="w-full h-56"><ChartComponent id="pCompQ" type="pie" data={{ labels: compraDataQ.map(d => d.label), datasets: [{ label: 'Qtd. Contratos', data: compraDataQ.map(d => d.count), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
+                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (Fornecedor)</h3>
+                    <div className="w-full h-56"><ChartComponent id="pFornV" type="pie" data={{ labels: fornPieDataV.map(d => d.label), datasets: [{ label: 'Valor Empenhado', data: fornPieDataV.map(d => d.total), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
+                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Qtd. Contratos (Fornecedor)</h3>
+                    <div className="w-full h-56"><ChartComponent id="pFornQ" type="pie" data={{ labels: fornPieDataQ.map(d => d.label), datasets: [{ label: 'Qtd. Contratos', data: fornPieDataQ.map(d => d.count), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
                 </div>
             </div>
 
@@ -965,14 +1065,13 @@ function Dashboard() {
                             scales: { 
                                 x: { ticks: { maxRotation: 90, minRotation: 0, font: { size: 10, weight: 'bold' }, autoSkip: false } },
                                 y_qtd: { type: 'linear', position: 'left', title: { display: true, text: 'Quantidade', font: { weight: 'bold' } } }, 
-                                y_val: { type: 'linear', position: 'right', grid: { display: false }, ticks: { callback: v => shortenNumber(v) }, title: { display: true, text: 'Valor Empenhado', font: { weight: 'bold' } } } 
+                                y_val: { type: 'linear', position: 'right', grid: { display: false }, ticks: { callback: v => shortenNumber(v) }, title: { display: true, text: 'Valor Empenhado (R$)', font: { weight: 'bold' } } } 
                             }
                         }} />
                     </div>
                 </div>
             </div>
 
-            {/* GRÁFICO DESEMPENHO POR CONTRATO (COM CORES DINÂMICAS E TOOLTIP RICO) */}
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <div className="flex justify-between items-center mb-6">
@@ -993,7 +1092,13 @@ function Dashboard() {
                                 },
                                 { 
                                     label: '% Execução', data: contratoChartData.map(d => d.p_executado), 
-                                    backgroundColor: contratoChartData.map(d => { if (d.p_executado >= 0.999) return '#22c55e'; if (d.p_executado >= 0.5) return '#eab308'; return '#ef4444'; }), 
+                                    backgroundColor: contratoChartData.map(d => getSemanticColor(d.p_executado)), 
+                                    yAxisID: 'y_perc', borderRadius: 4, type: 'bar',
+                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => formatPercentBR(v) }
+                                },
+                                { 
+                                    label: '% Liquidado', data: contratoChartData.map(d => d.p_liquidado), 
+                                    backgroundColor: contratoChartData.map(d => getHatchPattern(getSemanticColor(d.p_liquidado))), 
                                     yAxisID: 'y_perc', borderRadius: 4, type: 'bar',
                                     datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => formatPercentBR(v) }
                                 },
