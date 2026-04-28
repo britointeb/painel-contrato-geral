@@ -230,9 +230,6 @@ const exportMasterColumns = [
     { header: "EXECUTADO", key: "v_executado", isCurrency: true }, { header: "EXEC %", key: "p_executado", isPercent: true }
 ];
 
-// =========================================================
-// CONFIGURAÇÕES GLOBAIS DE GRÁFICOS
-// =========================================================
 const tooltipCallback = {
     callbacks: {
         label: function(context) {
@@ -541,6 +538,7 @@ function Dashboard() {
     const [fSecLog, setFSecLog] = useState([]);
     const [fContrato, setFContrato] = useState([]);
     const [fFornecedor, setFFornecedor] = useState([]);
+    const [fCompra, setFCompra] = useState([]); // Novo Filtro Dinâmico
     
     const [dInicDe, setDInicDe] = useState("");
     const [dInicAte, setDInicAte] = useState("");
@@ -571,7 +569,7 @@ function Dashboard() {
     };
 
     const clearAllFilters = () => {
-        setFFiscal([]); setFGestor([]); setFSecLog([]); setFContrato([]); setFFornecedor([]);
+        setFFiscal([]); setFGestor([]); setFSecLog([]); setFContrato([]); setFFornecedor([]); setFCompra([]);
         setDInicDe(""); setDInicAte(""); setDFimDe(""); setDFimAte("");
         setSearchContrato(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
         setFInexecutados(false); setFBloqueados(false); setFCancelados(false); 
@@ -688,6 +686,7 @@ function Dashboard() {
             const mSec = fSecLog.length === 0 || fSecLog.includes(item.sec_log);
             const mCont = fContrato.length === 0 || fContrato.includes(item.contrato);
             const mForn = fFornecedor.length === 0 || fFornecedor.includes(item.fornecedor);
+            const mCompra = fCompra.length === 0 || fCompra.includes(item.compra);
             
             const mDDe = !dInicDe || (item.dtInicVal && item.dtInicVal >= new Date(dInicDe+"T00:00:00").getTime());
             const mDAte = !dInicAte || (item.dtInicVal && item.dtInicVal <= new Date(dInicAte+"T23:59:59").getTime());
@@ -700,7 +699,9 @@ function Dashboard() {
             if (dateFilters.data_fim.min && item.dtFimVal < new Date(dateFilters.data_fim.min + "T00:00:00").getTime()) mDateTbl = false;
             if (dateFilters.data_fim.max && item.dtFimVal > new Date(dateFilters.data_fim.max + "T23:59:59").getTime()) mDateTbl = false;
 
-            const sCont = !searchContrato || item.contrato.includes(searchContrato.toUpperCase());
+            // Busca Múltipla expandida
+            const sCont = !searchContrato || item.contrato.includes(searchContrato.toUpperCase()) || item.compra.includes(searchContrato.toUpperCase()) || item.modalidade.includes(searchContrato.toUpperCase());
+            
             const sForn = !searchFornecedor || item.fornecedor.includes(searchFornecedor.toUpperCase());
             const sObj = !searchObjeto || item.objeto.includes(searchObjeto.toUpperCase());
             const sGest = !searchGestorFiscal || item.gestor.includes(searchGestorFiscal.toUpperCase()) || item.fiscal.includes(searchGestorFiscal.toUpperCase());
@@ -714,7 +715,7 @@ function Dashboard() {
                 if (numFilters[key].min !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) < parseFloat(numFilters[key].min)) { mNum = false; break; }
                 if (numFilters[key].max !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) > parseFloat(numFilters[key].max)) { mNum = false; break; }
             }
-            return mFisc && mGest && mSec && mCont && mForn && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sForn && sObj && sGest && mNum;
+            return mFisc && mGest && mSec && mCont && mForn && mCompra && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sForn && sObj && sGest && mNum;
         });
 
         if (sortConfig.key) {
@@ -731,7 +732,7 @@ function Dashboard() {
             });
         }
         return filtered;
-    }, [rawData, fFiscal, fGestor, fSecLog, fContrato, fFornecedor, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fInexecutados, fBloqueados, fCancelados]);
+    }, [rawData, fFiscal, fGestor, fSecLog, fContrato, fFornecedor, fCompra, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fInexecutados, fBloqueados, fCancelados]);
 
     const totalsMaster = useMemo(() => {
         let emp = 0, liq = 0, pag = 0, blo = 0, can = 0;
@@ -904,11 +905,13 @@ function Dashboard() {
                         <button onClick={clearAllFilters} className="text-[10px] font-bold uppercase bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-700 transition shadow-md">Limpar Filtros</button>
                     </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+                {/* INCLUSÃO DA NOVA COLUNA NO GRID AQUI */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
                     <MultiSelect label="FISCAL" options={[...new Set(rawData.map(r => r.fiscal))].sort()} selected={fFiscal} onChange={setFFiscal} />
                     <MultiSelect label="GESTOR" options={[...new Set(rawData.map(r => r.gestor))].sort()} selected={fGestor} onChange={setFGestor} />
                     <MultiSelect label="SEC LOG" options={[...new Set(rawData.map(r => r.sec_log))].sort()} selected={fSecLog} onChange={setFSecLog} />
                     <MultiSelect label="CONTRATO" options={[...new Set(rawData.map(r => r.contrato))].sort()} selected={fContrato} onChange={setFContrato} />
+                    <MultiSelect label="Nº COMPRA" options={[...new Set(rawData.map(r => r.compra))].sort()} selected={fCompra} onChange={setFCompra} />
                     <MultiSelect label="FORNECEDOR" options={[...new Set(rawData.map(r => r.fornecedor))].sort()} selected={fFornecedor} onChange={setFFornecedor} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
@@ -941,10 +944,10 @@ function Dashboard() {
                     <ChartComponent id="gGestor" type="bar" data={{
                         labels: gestorData.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
-                            { label: 'Qtd. Contratos', data: gestorData.map(d => d.count), backgroundColor: '#eab308', xAxisID: 'x1', borderRadius: 4,
+                            { label: 'Qtd', data: gestorData.map(d => d.count), backgroundColor: '#eab308', xAxisID: 'x1', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             },
-                            { label: 'Valor Empenhado', data: gestorData.map(d => d.total), backgroundColor: '#3b82f6', xAxisID: 'x', borderRadius: 4,
+                            { label: 'Empenhado', data: gestorData.map(d => d.total), backgroundColor: '#3b82f6', xAxisID: 'x', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'left', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             }
                         ]
@@ -955,10 +958,10 @@ function Dashboard() {
                     <ChartComponent id="gFiscal" type="bar" data={{
                         labels: fiscalData.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
-                            { label: 'Qtd. Contratos', data: fiscalData.map(d => d.count), backgroundColor: '#f97316', xAxisID: 'x1', borderRadius: 4,
+                            { label: 'Qtd', data: fiscalData.map(d => d.count), backgroundColor: '#f97316', xAxisID: 'x1', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             },
-                            { label: 'Valor Empenhado', data: fiscalData.map(d => d.total), backgroundColor: '#22c55e', xAxisID: 'x', borderRadius: 4,
+                            { label: 'Empenhado', data: fiscalData.map(d => d.total), backgroundColor: '#22c55e', xAxisID: 'x', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'left', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             }
                         ]
