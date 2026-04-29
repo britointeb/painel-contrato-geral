@@ -5,7 +5,7 @@ if (window.ChartDataLabels) {
     Chart.defaults.set('plugins.datalabels', { display: false });
 }
 
-// Plugin para linha vertical
+// Plugin para linha vertical nos gráficos de barra
 const customLinePlugin = {
     id: 'customLinePlugin',
     afterDatasetsDraw: (chart) => {
@@ -31,28 +31,65 @@ const customLinePlugin = {
 };
 Chart.register(customLinePlugin);
 
-// Função global para gerar um preenchimento achurado em canvas
-const patternCache = {};
-const getHatchPattern = (color) => {
-    if (patternCache[color]) return patternCache[color];
-    const canvas = document.createElement('canvas');
-    canvas.width = 8;
-    canvas.height = 8;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, 8, 8);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, 8);
-    ctx.lineTo(8, 0);
-    ctx.stroke();
-    patternCache[color] = ctx.createPattern(canvas, 'repeat');
-    return patternCache[color];
+// Plugin exclusivo para desenhar as linhas conectando as fatias da Pizza aos valores externos
+const pieLinePlugin = {
+    id: 'pieLinePlugin',
+    afterDraw: (chart) => {
+        if (chart.config.type !== 'pie') return;
+        const ctx = chart.ctx;
+        const meta = chart.getDatasetMeta(0);
+        if (!meta || !meta.data) return;
+
+        ctx.save();
+        ctx.strokeStyle = '#cbd5e1'; 
+        ctx.lineWidth = 1.2;
+
+        meta.data.forEach((element, index) => {
+            const dataset = chart.data.datasets[0];
+            const value = dataset.data[index];
+            const total = dataset.data.reduce((a, b) => a + b, 0);
+            if (!total || value === 0) return; 
+
+            const angle = (element.startAngle + element.endAngle) / 2;
+            const outerRadius = element.outerRadius;
+            const x = element.x;
+            const y = element.y;
+
+            const startX = x + Math.cos(angle) * outerRadius;
+            const startY = y + Math.sin(angle) * outerRadius;
+
+            const endX = x + Math.cos(angle) * (outerRadius + 15);
+            const endY = y + Math.sin(angle) * (outerRadius + 15);
+
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            
+            const sign = Math.cos(angle) >= 0 ? 1 : -1;
+            ctx.lineTo(endX + 5 * sign, endY);
+            
+            ctx.stroke();
+        });
+        ctx.restore();
+    }
+};
+Chart.register(pieLinePlugin);
+
+// Mapa de cores unificado para TAGS de Situação e Gráfico de Dispersão
+const tagColorsMap = {
+    'ATIVO INEXEC': { css: 'bg-purple-700 text-white', hex: '#7e22ce' },
+    'ATIVO EM EXEC': { css: 'bg-cyan-500 text-slate-900', hex: '#06b6d4' },
+    'ATIVO EXEC TOT': { css: 'bg-blue-800 text-white', hex: '#1e40af' },
+    'ATIVO EXEC PARC': { css: 'bg-sky-400 text-slate-900', hex: '#38bdf8' },
+    'VENC INEXEC TOT': { css: 'bg-rose-900 text-white', hex: '#881337' },
+    'VENC EXEC TOT': { css: 'bg-green-600 text-white', hex: '#16a34a' },
+    'VENC EXEC PARC': { css: 'bg-yellow-500 text-slate-900', hex: '#eab308' },
+    'CAN': { css: 'bg-red-600 text-white', hex: '#dc2626' },
+    'BLOQ': { css: 'bg-orange-500 text-white', hex: '#f97316' }
 };
 
 // Paleta base para Pizzas
-const pieColors = ['#3b82f6', '#eab308', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#14b8a6', '#f43f5e', '#6366f1', '#94a3b8'];
+const pieColors = ['#3b82f6', '#eab308', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#14b8a6', '#f43f5e', '#6366f1', '#0ea5e9'];
 
 const decodeBinary = (binStr) => {
     try {
@@ -66,11 +103,7 @@ const decodeBinary = (binStr) => {
 
 const normalizeStr = (str) => {
     if (!str) return "";
-    return str.toString()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase()
-        .replace(/[^a-z0-9%]/g, '');
+    return str.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9%]/g, '');
 };
 
 const SPREADSHEET_ID = "1Fuhb3HMRzg2kEozkuREFNKYSXtqUCLhZWFFuWM-f3v4"; 
@@ -211,13 +244,14 @@ const exportMasterColumns = [
     { header: "COMPRA", key: "compra" }, { header: "MODALIDADE", key: "modalidade" }, { header: "INÍCIO", key: "data_inic" }, 
     { header: "FIM", key: "data_fim" }, { header: "% TEMPO", key: "perc_tempo", isPercent: true }, 
     { header: "PASSARAM", key: "dias_passaram" }, { header: "FALTAM", key: "encerrando_dias" },
-    { header: "GLOBAL", key: "v_global", isCurrency: true }, { header: "EMPENHADO", key: "v_empenhado", isCurrency: true },
-    { header: "LIQUIDADO", key: "v_liquidado", isCurrency: true }, { header: "LIQ %", key: "p_liquidado", isPercent: true },
-    { header: "PAGO", key: "v_pago", isCurrency: true }, { header: "PAGO %", key: "p_pago", isPercent: true },
-    { header: "BLOQUEADO", key: "v_bloqueado", isCurrency: true }, { header: "BLOQ %", key: "p_bloqueado", isPercent: true },
-    { header: "CANCELADO", key: "v_cancelado", isCurrency: true }, { header: "CANC %", key: "p_cancelado", isPercent: true },
-    { header: "EXECUTADO", key: "v_executado", isCurrency: true }, { header: "EXEC %", key: "p_executado", isPercent: true },
-    { header: "EXEC LIQ", key: "v_pago", isCurrency: true }, { header: "EXEC LIQ %", key: "p_pago", isPercent: true }
+    { header: "GLOBAL-EMP", key: "dif_global", isCurrency: true }, { header: "GLOBAL", key: "v_global", isCurrency: true }, 
+    { header: "EMPENHADO", key: "v_empenhado", isCurrency: true }, { header: "LIQUIDADO", key: "v_liquidado", isCurrency: true }, 
+    { header: "LIQ %", key: "p_liquidado", isPercent: true }, { header: "PAGO", key: "v_pago", isCurrency: true }, 
+    { header: "PAGO %", key: "p_pago", isPercent: true }, { header: "BLOQUEADO", key: "v_bloqueado", isCurrency: true }, 
+    { header: "BLOQ %", key: "p_bloqueado", isPercent: true }, { header: "CANCELADO", key: "v_cancelado", isCurrency: true }, 
+    { header: "CANC %", key: "p_cancelado", isPercent: true }, { header: "EXECUTADO", key: "v_executado", isCurrency: true }, 
+    { header: "EXEC %", key: "p_executado", isPercent: true }, { header: "EXEC LIQ", key: "v_pago", isCurrency: true }, 
+    { header: "EXEC LIQ %", key: "p_pago", isPercent: true }
 ];
 
 const tooltipCallback = {
@@ -225,7 +259,7 @@ const tooltipCallback = {
         label: function(context) {
             let label = context.dataset.label || '';
             if (label) label += ': ';
-            if (label.includes('Qtd') || label.includes('Quantidade') || label.includes('Contratos')) {
+            if (label.includes('QTD') || label.includes('Quantidade') || label.includes('Contratos')) {
                 label += context.raw.toLocaleString('pt-BR');
             } else {
                 label += formatBRL(context.raw);
@@ -248,7 +282,7 @@ const getFullTooltipFornecedor = (dataArray) => ({
         label: function(context) {
             let label = context.dataset.label || '';
             if (label) label += ': ';
-            if (label.includes('Qtd') || label.includes('Quantidade')) label += context.raw.toLocaleString('pt-BR');
+            if (label.includes('QTD') || label.includes('Quantidade')) label += context.raw.toLocaleString('pt-BR');
             else label += formatBRL(context.raw);
             return label;
         }
@@ -289,7 +323,7 @@ const getFullTooltipContrato = (dataArray) => ({
     }
 });
 
-const getBubbleTooltip = () => ({
+const getBubbleTooltip = (xAxisMetricStr) => ({
     callbacks: {
         title: function(tooltipItems) {
             return `Contrato: ${tooltipItems[0].raw.contrato}`;
@@ -298,29 +332,11 @@ const getBubbleTooltip = () => ({
             const d = context.raw;
             return [
                 `Fornecedor: ${d.fornecedor}`,
+                `Situação: ${d.situacao}`,
                 `Empenhado: ${formatBRL(d.v_empenhado)}`,
-                `Liquidado: ${formatBRL(d.v_liquidado)} (${formatPercentBR(d.p_liquidado)})`,
-                `Pago: ${formatBRL(d.v_pago)} (${formatPercentBR(d.p_pago)})`
+                `${xAxisMetricStr}: ${formatPercentBR(d.x / 100)}`,
+                `% Tempo: ${formatPercentBR(d.y / 100)}`
             ];
-        }
-    }
-});
-
-const getPieOptions = () => ({
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-        tooltip: tooltipCallback,
-        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } },
-        datalabels: {
-            display: true, color: '#fff', font: { weight: 'bold', size: 10 },
-            formatter: (value, context) => {
-                const dataArr = context.chart.data.datasets[0].data;
-                const total = dataArr.reduce((a, b) => a + b, 0);
-                if (!total) return '';
-                const percentage = (value * 100 / total);
-                return percentage > 4 ? percentage.toFixed(1).replace('.', ',') + '%' : '';
-            }
         }
     }
 });
@@ -376,6 +392,192 @@ const ChartComponent = ({ type, data, options, id }) => {
     }, [data, options, type]);
     return <canvas ref={canvasRef}></canvas>;
 };
+
+// Componente: Alterna entre Gráfico de Pizza e Barra Vertical Única
+function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
+    const [viewPie, setViewPie] = useState(true);
+
+    const cleanData = useMemo(() => {
+        let processed = [...data];
+        if (isFornecedor) {
+            processed = processed.map(d => ({
+                ...d,
+                label: d.label.replace(/^[\d\.\-\/]+\s*-\s*/, '')
+            }));
+        }
+        processed.sort((a, b) => b[pieMetric] - a[pieMetric]);
+        return processed;
+    }, [data, isFornecedor, pieMetric]);
+
+    const chartLabels = cleanData.map(d => formatLabelMultiLine(d.label, 15));
+    const isTotal = pieMetric === 'total';
+
+    const pieData = {
+        labels: cleanData.map(d => d.label),
+        datasets: [{
+            label: isTotal ? 'Valor Empenhado' : 'QTD Contratos',
+            data: cleanData.map(d => d[pieMetric]),
+            backgroundColor: cleanData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : pieColors[i % pieColors.length]),
+            borderWidth: 1,
+            borderColor: '#ffffff'
+        }]
+    };
+
+    const pieOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: 40 }, 
+        plugins: {
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        let label = context.label || '';
+                        if (label) label += ': ';
+                        let value = context.raw;
+                        const dataArr = context.chart.data.datasets[0].data;
+                        const total = dataArr.reduce((a, b) => a + b, 0);
+                        const percentage = total ? (value * 100 / total).toFixed(2).replace('.', ',') + '%' : '0%';
+                        if (isTotal) {
+                            label += formatBRL(value) + ' (' + percentage + ')';
+                        } else {
+                            label += value.toLocaleString('pt-BR') + ' (' + percentage + ')';
+                        }
+                        return label;
+                    }
+                }
+            },
+            legend: { 
+                position: 'bottom', 
+                labels: { 
+                    boxWidth: cleanData.length > 6 ? 6 : 10,
+                    padding: cleanData.length > 6 ? 4 : 8,
+                    font: { size: cleanData.length > 6 ? 8 : 10 },
+                    generateLabels: function(chart) {
+                        const data = chart.data;
+                        if (data.labels.length && data.datasets.length) {
+                            return data.labels.map(function(label, i) {
+                                const meta = chart.getDatasetMeta(0);
+                                const style = meta.controller.getStyle(i);
+                                const maxLen = data.labels.length > 6 ? 12 : 18;
+                                return {
+                                    text: label.length > maxLen ? label.substring(0, maxLen) + '...' : label,
+                                    fillStyle: style.backgroundColor,
+                                    strokeStyle: style.borderColor,
+                                    lineWidth: style.borderWidth,
+                                    hidden: isNaN(data.datasets[0].data[i]) || meta.data[i].hidden,
+                                    index: i
+                                };
+                            });
+                        }
+                        return [];
+                    }
+                } 
+            },
+            datalabels: {
+                display: true, 
+                color: '#334155',
+                align: 'end',
+                anchor: 'end',
+                offset: 20, 
+                textAlign: 'center',
+                font: (context) => {
+                    const dataArr = context.chart.data.datasets[0].data;
+                    const val = context.dataset.data[context.dataIndex];
+                    const total = dataArr.reduce((a, b) => a + b, 0);
+                    const percentage = total ? (val * 100 / total) : 0;
+                    return { weight: 'bold', size: percentage < 4 ? 7 : (percentage < 10 ? 8 : 9) };
+                },
+                formatter: (value, context) => {
+                    const dataArr = context.chart.data.datasets[0].data;
+                    const total = dataArr.reduce((a, b) => a + b, 0);
+                    if (!total || value === 0) return '';
+                    const percentage = (value * 100 / total);
+                    const valStr = isTotal ? shortenNumber(value) : value.toLocaleString('pt-BR');
+                    return `${percentage.toFixed(1).replace('.', ',')}%\n${valStr}`;
+                }
+            }
+        }
+    };
+
+    const barData = {
+        labels: chartLabels,
+        datasets: [{
+            label: isTotal ? 'Valor Empenhado' : 'Quantidade',
+            data: cleanData.map(d => d[pieMetric]),
+            backgroundColor: cleanData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : (isTotal ? '#3b82f6' : '#f97316')),
+            borderRadius: 4
+        }]
+    };
+
+    const barOptions = {
+        indexAxis: 'x',
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: { padding: { top: 30 } },
+        plugins: {
+            tooltip: tooltipCallback,
+            legend: { display: false }, 
+            datalabels: {
+                display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
+                color: '#1e293b',
+                align: 'end',
+                anchor: 'end',
+                rotation: -90,
+                offset: 4,
+                font: { size: 9, weight: 'bold' },
+                formatter: (v) => isTotal ? shortenNumber(v) : v.toLocaleString('pt-BR')
+            }
+        },
+        scales: {
+            x: { 
+                ticks: { 
+                    maxRotation: 90, 
+                    minRotation: 45, 
+                    font: { size: 9 },
+                    autoSkip: false, 
+                    callback: function(value) {
+                        const label = this.getLabelForValue(value);
+                        if (Array.isArray(label)) { return label.map(l => l.length > 15 ? l.substring(0, 15) + '...' : l); }
+                        return label.length > 15 ? label.substring(0, 15) + '...' : label;
+                    }
+                } 
+            },
+            y: { 
+                beginAtZero: true,
+                grace: '10%',
+                position: 'left',
+                grid: { display: true },
+                ticks: { callback: v => isTotal ? shortenNumber(v) : v },
+                title: { display: true, text: isTotal ? 'Valor Empenhado (R$)' : 'Quantidade', font: { size: 9, weight: 'bold' } }
+            }
+        }
+    };
+
+    return (
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full hover:shadow-md transition">
+            <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
+                <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-tight flex-1 pr-2">{title}</h3>
+                <div className="flex gap-2 items-center shrink-0">
+                    <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded">
+                        {viewPie ? 'Fatias' : 'Barras'}: {data.length}
+                    </span>
+                    <button onClick={() => setViewPie(!viewPie)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer">
+                        {viewPie ? '► BARRAS' : '► PIZZA'}
+                    </button>
+                </div>
+            </div>
+            <div className="w-full flex-1 flex flex-col min-h-[300px] relative">
+                <div className="absolute inset-0">
+                    {viewPie ? (
+                        <ChartComponent id={`pie-${id}`} type="pie" data={pieData} options={pieOptions} />
+                    ) : (
+                        <ChartComponent id={`bar-${id}`} type="bar" data={barData} options={barOptions} />
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function KPICard({ title, value, subValue, diffValue, diffLabel, extraText, color, isCurrency }) {
     const colors = { 
@@ -534,15 +736,23 @@ function Dashboard() {
     const [status, setStatus] = useState("A verificar sessão local...");
     
     const [sortConfig, setSortConfig] = useState({ key: 'v_empenhado', direction: 'desc' });
+    const [top20Sort, setTop20Sort] = useState('valor_desc');
+    const [top20ViewMode, setTop20ViewMode] = useState('fornecedor');
     const [fornecedorSort, setFornecedorSort] = useState('valor_desc');
     const [contratoSort, setContratoSort] = useState('valor_desc');
+    const [scatterXAxis, setScatterXAxis] = useState('p_executado');
+    const [scatterHiddenTags, setScatterHiddenTags] = useState([]);
     
+    // Novos Estados de Filtros
     const [fFiscal, setFFiscal] = useState([]);
     const [fGestor, setFGestor] = useState([]);
+    const [fFiscalSub, setFFiscalSub] = useState([]);
+    const [fGestorSub, setFGestorSub] = useState([]);
     const [fSecLog, setFSecLog] = useState([]);
     const [fContrato, setFContrato] = useState([]);
-    const [fFornecedor, setFFornecedor] = useState([]);
     const [fCompra, setFCompra] = useState([]); 
+    const [fModalidade, setFModalidade] = useState([]);
+    const [fFornecedor, setFFornecedor] = useState([]);
     
     const [dInicDe, setDInicDe] = useState("");
     const [dInicAte, setDInicAte] = useState("");
@@ -555,13 +765,9 @@ function Dashboard() {
     const [searchObjeto, setSearchObjeto] = useState("");
     const [searchGestorFiscal, setSearchGestorFiscal] = useState("");
 
-    const [fInexecutados, setFInexecutados] = useState(false);
-    const [fBloqueados, setFBloqueados] = useState(false);
-    const [fCancelados, setFCancelados] = useState(false);
-
     const initialNumFilters = {
         perc_tempo: {min:'', max:''}, dias_passaram: {min:'', max:''}, encerrando_dias: {min:'', max:''}, 
-        v_global: {min:'', max:''}, v_empenhado: {min:'', max:''}, v_liquidado: {min:'', max:''}, p_liquidado: {min:'', max:''}, 
+        dif_global: {min:'', max:''}, v_global: {min:'', max:''}, v_empenhado: {min:'', max:''}, v_liquidado: {min:'', max:''}, p_liquidado: {min:'', max:''}, 
         v_pago: {min:'', max:''}, p_pago: {min:'', max:''}, v_bloqueado: {min:'', max:''}, p_bloqueado: {min:'', max:''},
         v_cancelado: {min:'', max:''}, p_cancelado: {min:'', max:''}, v_executado: {min:'', max:''}, p_executado: {min:'', max:''}
     };
@@ -569,25 +775,35 @@ function Dashboard() {
     const initialDateFilters = { data_inic: {min:'', max:''}, data_fim: {min:'', max:''} };
     const [dateFilters, setDateFilters] = useState(initialDateFilters);
 
+    // TAGs System para Ações Rápidas
+    const [fSituacaoTags, setFSituacaoTags] = useState([]);
+    const toggleSituacaoTag = (lbl) => {
+        setFSituacaoTags(prev => prev.includes(lbl) ? prev.filter(x => x !== lbl) : [...prev, lbl]);
+    };
+    
+    const toggleScatterTag = (tag) => {
+        setScatterHiddenTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
+    };
+
     const handleSort = (key) => {
         setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc' }));
     };
 
     const clearAllFilters = () => {
-        setFFiscal([]); setFGestor([]); setFSecLog([]); setFContrato([]); setFFornecedor([]); setFCompra([]);
+        setFFiscal([]); setFGestor([]); setFFiscalSub([]); setFGestorSub([]); setFSecLog([]); setFContrato([]); setFCompra([]); setFModalidade([]); setFFornecedor([]);
         setDInicDe(""); setDInicAte(""); setDFimDe(""); setDFimAte("");
         setSearchContrato(""); setSearchSituacao(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
-        setFInexecutados(false); setFBloqueados(false); setFCancelados(false); 
+        setFSituacaoTags([]);
         setNumFilters(initialNumFilters); setDateFilters(initialDateFilters);
     };
 
-    const applyFilterAcessoHoje = () => {
-        const today = new Date();
-        setDFimDe(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
-        setDFimAte(""); 
-    };
+    const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+    const isHojeActive = dFimDe === todayStr;
+    const toggleHoje = () => { if (isHojeActive) setDFimDe(""); else setDFimDe(todayStr); };
 
-    const applyFilterCSup = () => { setFSecLog(["SGLS-CLASSE I", "SGLFE-CLASSE II", "SGLC-CLASSE III", "SGLME-CLASSE V (MUN)"]); };
+    const cSupItems = ["SGLS-CLASSE I", "SGLFE-CLASSE II", "SGLC-CLASSE III", "SGLME-CLASSE V (MUN)"];
+    const isCSupActive = fSecLog.length === 4 && cSupItems.every(i => fSecLog.includes(i));
+    const toggleCSup = () => { if (isCSupActive) setFSecLog([]); else setFSecLog(cSupItems); };
 
     const logout = () => {
         try { localStorage.removeItem('isAuth_PainelGeral'); localStorage.removeItem('dashData_PainelGeral'); } catch(e) {}
@@ -631,14 +847,17 @@ function Dashboard() {
                 contrato: (getVal(["Número Contrato", "numero_contrato"]) || "-").toUpperCase(),
                 fornecedor: (getVal(["Fornecedor"]) || "-").toUpperCase(),
                 objeto: (getVal(["Objeto"]) || "-").toUpperCase(),
-                fiscal: (getVal(["FISCAL_TITULAR"]) || "N/I").toUpperCase(),
-                gestor: (getVal(["GESTOR_TITULAR"]) || "N/I").toUpperCase(),
+                fiscal: (getVal(["FISCAL_TITULAR", "Fiscal Titular"]) || "N/I").toUpperCase(),
+                gestor: (getVal(["GESTOR_TITULAR", "Gestor Titular"]) || "N/I").toUpperCase(),
+                fiscal_sub: (getVal(["FISCAL_SUBSTITUTO", "Fiscal Substituto"]) || "N/I").toUpperCase(),
+                gestor_sub: (getVal(["GESTOR_SUBSTITUTO", "Gestor Substituto"]) || "N/I").toUpperCase(),
                 sec_log: (getVal(["SEC_LOG"]) || "N/I").toUpperCase(),
-                modalidade: (getVal(["Modalidade da Compra"]) || "N/I").toUpperCase(),
+                modalidade: (getVal(["Modalidade da Compra", "Modalidade"]) || "N/I").toUpperCase(),
                 compra: (getVal(["Número da Compra", "Numero da Compra", "Número Compra", "Numero Compra"]) || "N/I").toUpperCase(),
                 
                 data_inic: getVal(["Vig. Início", "Vigencia Inicio"]), data_fim: getVal(["Vig. Fim", "Vigencia Fim"]),
                 dtInicVal: dtInicParsed ? dtInicParsed.getTime() : 0, dtFimVal: dtFimParsed ? dtFimParsed.getTime() : 0,
+                ano_vig_ini: dtInicParsed ? dtInicParsed.getFullYear().toString() : "N/I",
                 dias_passaram: diasPassaram, perc_tempo: percTempo, encerrando_dias: diasRestantes,
                 
                 v_global: parseValue(getVal(["Valor Global"])), v_empenhado: parseValue(getVal(["TOTAL EMPENHADO"])),
@@ -667,22 +886,20 @@ function Dashboard() {
             }
         });
 
-        // NOVA LÓGICA DE ÁRVORE DE DECISÃO DAS TAGS (E SOMENTE ESSAS)
+        // Árvore de Decisão de TAGS
         mappedRaw.forEach(r => {
             const c = cTotals[r.contrato];
             r.contrato_empenhado_total = c.v_empenhado;
+            r.dif_global = r.v_global - r.v_empenhado; 
             
             let flags = [];
             let sitText = "";
             
-            // TAGs Independentes
-            if (c.v_cancelado > 0) { flags.push({ label: 'CAN', color: 'bg-red-600 text-white' }); sitText += "CAN "; }
-            if (c.v_bloqueado > 0) { flags.push({ label: 'BLOQ', color: 'bg-orange-500 text-white' }); sitText += "BLOQ "; }
+            if (c.v_cancelado > 0) { flags.push({ label: 'CAN', color: tagColorsMap['CAN'].css, hex: tagColorsMap['CAN'].hex }); sitText += "CAN "; }
+            if (c.v_bloqueado > 0) { flags.push({ label: 'BLOQ', color: tagColorsMap['BLOQ'].css, hex: tagColorsMap['BLOQ'].hex }); sitText += "BLOQ "; }
             
-            // Fluxo Principal Mútuo Exclusivo (E SOMENTE ESTAS TAGS)
             if (c.encerrando_dias !== null) {
                 const isAtivo = c.encerrando_dias >= 0;
-                
                 const isLiquidadoZero = c.v_liquidado <= 0.01;
                 const isPagoZero = c.v_pago <= 0.01;
                 const isPagoIgualEmpenhado = c.v_pago >= (c.v_empenhado - 0.01) && c.v_empenhado > 0;
@@ -690,35 +907,25 @@ function Dashboard() {
                 const isPagoMenorEmpenhado = c.v_pago < (c.v_empenhado - 0.01);
                 const isExecutadoMenorEmpenhado = c.v_executado < (c.v_empenhado - 0.01);
 
+                let tagKey = null;
                 if (isAtivo) {
-                    if (isLiquidadoZero) {
-                        flags.push({ label: 'ATIVO INEXEC', color: 'bg-purple-700 text-white' });
-                        sitText += "ATIVO INEXEC ";
-                    } else if (isExecutadoMenorEmpenhado) {
-                        flags.push({ label: 'ATIVO EM EXEC', color: 'bg-cyan-500 text-slate-900' });
-                        sitText += "ATIVO EM EXEC ";
-                    } else if (isPagoIgualEmpenhado) {
-                        flags.push({ label: 'ATIVO EXEC TOT', color: 'bg-blue-800 text-white' });
-                        sitText += "ATIVO EXEC TOT ";
-                    } else if (isPagoMenorEmpenhado && isExecutadoIgualEmpenhado) {
-                        flags.push({ label: 'ATIVO EXEC PARC', color: 'bg-sky-400 text-slate-900' });
-                        sitText += "ATIVO EXEC PARC ";
-                    }
+                    if (isLiquidadoZero) tagKey = 'ATIVO INEXEC';
+                    else if (isExecutadoMenorEmpenhado) tagKey = 'ATIVO EM EXEC';
+                    else if (isPagoIgualEmpenhado) tagKey = 'ATIVO EXEC TOT';
+                    else if (isPagoMenorEmpenhado && isExecutadoIgualEmpenhado) tagKey = 'ATIVO EXEC PARC';
                 } else {
-                    if (isPagoZero) {
-                        flags.push({ label: 'VENC INEXEC TOT', color: 'bg-rose-900 text-white' });
-                        sitText += "VENC INEXEC TOT ";
-                    } else if (isPagoIgualEmpenhado) {
-                        flags.push({ label: 'VENC EXEC TOT', color: 'bg-green-600 text-white' });
-                        sitText += "VENC EXEC TOT ";
-                    } else if (isPagoMenorEmpenhado && isExecutadoIgualEmpenhado) {
-                        flags.push({ label: 'VENC EXEC PARC', color: 'bg-yellow-500 text-slate-900' });
-                        sitText += "VENC EXEC PARC ";
-                    }
+                    if (isPagoZero) tagKey = 'VENC INEXEC TOT';
+                    else if (isPagoIgualEmpenhado) tagKey = 'VENC EXEC TOT';
+                    else if (isPagoMenorEmpenhado && isExecutadoIgualEmpenhado) tagKey = 'VENC EXEC PARC';
+                }
+                
+                if(tagKey) {
+                    flags.push({ label: tagKey, color: tagColorsMap[tagKey].css, hex: tagColorsMap[tagKey].hex });
+                    sitText += `${tagKey} `;
                 }
             }
             r.situacaoFlags = flags;
-            r.situacao = sitText.trim();
+            r.situacao = sitText.trim() || 'N/I';
         });
         
         setRawData(mappedRaw);
@@ -759,10 +966,13 @@ function Dashboard() {
         let filtered = rawData.filter(item => {
             const mFisc = fFiscal.length === 0 || fFiscal.includes(item.fiscal);
             const mGest = fGestor.length === 0 || fGestor.includes(item.gestor);
+            const mFiscSub = fFiscalSub.length === 0 || fFiscalSub.includes(item.fiscal_sub);
+            const mGestSub = fGestorSub.length === 0 || fGestorSub.includes(item.gestor_sub);
             const mSec = fSecLog.length === 0 || fSecLog.includes(item.sec_log);
             const mCont = fContrato.length === 0 || fContrato.includes(item.contrato);
             const mForn = fFornecedor.length === 0 || fFornecedor.includes(item.fornecedor);
             const mCompra = fCompra.length === 0 || fCompra.includes(item.compra);
+            const mMod = fModalidade.length === 0 || fModalidade.includes(item.modalidade);
             
             const mDDe = !dInicDe || (item.dtInicVal && item.dtInicVal >= new Date(dInicDe+"T00:00:00").getTime());
             const mDAte = !dInicAte || (item.dtInicVal && item.dtInicVal <= new Date(dInicAte+"T23:59:59").getTime());
@@ -781,16 +991,14 @@ function Dashboard() {
             const sObj = !searchObjeto || item.objeto.includes(searchObjeto.toUpperCase());
             const sGest = !searchGestorFiscal || item.gestor.includes(searchGestorFiscal.toUpperCase()) || item.fiscal.includes(searchGestorFiscal.toUpperCase());
 
-            if (fInexecutados && item.p_executado >= 0.9999) return false;
-            if (fBloqueados && item.v_bloqueado <= 0) return false;
-            if (fCancelados && item.v_cancelado <= 0) return false;
+            const mSitTag = fSituacaoTags.length === 0 || item.situacaoFlags.some(f => fSituacaoTags.includes(f.label));
 
             let mNum = true;
             for (const key in numFilters) {
                 if (numFilters[key].min !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) < parseFloat(numFilters[key].min)) { mNum = false; break; }
                 if (numFilters[key].max !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) > parseFloat(numFilters[key].max)) { mNum = false; break; }
             }
-            return mFisc && mGest && mSec && mCont && mForn && mCompra && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sForn && sObj && sGest && mNum;
+            return mFisc && mGest && mFiscSub && mGestSub && mSec && mCont && mForn && mCompra && mMod && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sForn && sObj && sGest && mSitTag && mNum;
         });
 
         if (sortConfig.key) {
@@ -807,7 +1015,7 @@ function Dashboard() {
             });
         }
         return filtered;
-    }, [rawData, fFiscal, fGestor, fSecLog, fContrato, fFornecedor, fCompra, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fInexecutados, fBloqueados, fCancelados]);
+    }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
 
     const totalsMaster = useMemo(() => {
         let emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0;
@@ -856,10 +1064,18 @@ function Dashboard() {
         };
     }, [filteredData]);
 
-    const getPieData = (key, metric = 'total') => {
+    const getPieData = (key, metric = 'total', filterCustom = null) => {
         const map = {};
-        filteredData.forEach(item => {
-            const val = item[key] && item[key] !== "-" ? item[key] : "N/I";
+        const dataToProcess = filterCustom ? filteredData.filter(filterCustom) : filteredData;
+        
+        dataToProcess.forEach(item => {
+            // Se for situação, pegar a tag principal
+            let val = item[key] && item[key] !== "-" ? item[key] : "N/I";
+            if (key === 'situacao') {
+                const mainTag = item.situacaoFlags.find(f => !['CAN','BLOQ'].includes(f.label));
+                val = mainTag ? mainTag.label : val;
+            }
+            
             if (!map[val]) map[val] = { label: val, count: 0, total: 0 };
             map[val].count += 1; 
             map[val].total += item.v_empenhado;
@@ -899,24 +1115,37 @@ function Dashboard() {
     const compraDataQ = getPieData('compra', 'count');
     const fornPieDataV = getPieData('fornecedor', 'total');
     const fornPieDataQ = getPieData('fornecedor', 'count');
+    const anoVigIniDataV = getPieData('ano_vig_ini', 'total');
+    const anoVigIniDataQ = getPieData('ano_vig_ini', 'count');
+    
+    // Gráficos Situação restritos a apenas as 7 TAGS
+    const allowedSitTags = ['ATIVO INEXEC', 'ATIVO EM EXEC', 'ATIVO EXEC TOT', 'ATIVO EXEC PARC', 'VENC INEXEC TOT', 'VENC EXEC TOT', 'VENC EXEC PARC'];
+    const sitFilter = (item) => item.situacaoFlags.some(f => allowedSitTags.includes(f.label));
+    const situacaoDataV = getPieData('situacao', 'total', sitFilter);
+    const situacaoDataQ = getPieData('situacao', 'count', sitFilter);
 
-    const fornecedorChartData = useMemo(() => {
+    const top20DataProcessed = useMemo(() => {
         const map = {};
         filteredData.forEach(item => {
-            if (!map[item.fornecedor]) map[item.fornecedor] = { label: item.fornecedor, count: 0, total: 0, pago: 0, objetos: new Set(), modalidades: new Set() };
-            map[item.fornecedor].count += 1; 
-            map[item.fornecedor].total += item.v_empenhado;
-            map[item.fornecedor].pago += item.v_pago;
-            if(item.objeto && item.objeto !== "-") map[item.fornecedor].objetos.add(item.objeto);
-            if(item.modalidade && item.modalidade !== "-") map[item.fornecedor].modalidades.add(item.modalidade);
+            const key = top20ViewMode === 'fornecedor' ? item.fornecedor : item.contrato;
+            if (!map[key]) map[key] = { label: key, count: 0, total: 0, liquidado: 0, pago: 0, bloqueado: 0, cancelado: 0, executado: 0, objetos: new Set(), modalidades: new Set(), fornecedor: item.fornecedor };
+            map[key].count += 1; 
+            map[key].total += item.v_empenhado;
+            map[key].liquidado += item.v_liquidado;
+            map[key].pago += item.v_pago;
+            map[key].bloqueado += item.v_bloqueado;
+            map[key].cancelado += item.v_cancelado;
+            map[key].executado += item.v_executado;
+            if(item.objeto && item.objeto !== "-") map[key].objetos.add(item.objeto);
+            if(item.modalidade && item.modalidade !== "-") map[key].modalidades.add(item.modalidade);
         });
         let arr = Object.values(map);
-        if (fornecedorSort === 'valor_desc') arr.sort((a, b) => b.total - a.total);
-        else if (fornecedorSort === 'qtd_desc') arr.sort((a, b) => b.count - a.count);
-        else if (fornecedorSort === 'nome_asc') arr.sort((a, b) => a.label.localeCompare(b.label));
-        else if (fornecedorSort === 'nome_desc') arr.sort((a, b) => b.label.localeCompare(a.label));
+        if (top20Sort === 'valor_desc') arr.sort((a, b) => b.total - a.total);
+        else if (top20Sort === 'qtd_desc') arr.sort((a, b) => b.count - a.count);
+        else if (top20Sort === 'nome_asc') arr.sort((a, b) => a.label.localeCompare(b.label));
+        else if (top20Sort === 'nome_desc') arr.sort((a, b) => b.label.localeCompare(a.label));
         return arr.slice(0, 20); 
-    }, [filteredData, fornecedorSort]);
+    }, [filteredData, top20Sort, top20ViewMode]);
 
     const contratoChartData = useMemo(() => {
         let arr = [...filteredData];
@@ -933,43 +1162,52 @@ function Dashboard() {
     }, [filteredData, contratoSort]);
 
     const dataByAno = useMemo(() => {
-        const anosMap = {};
-        filteredData.forEach(item => {
-            if (!item.contrato || item.contrato === "-") return;
-            const anoInic = item.dtInicVal ? new Date(item.dtInicVal).getFullYear() : null;
-            const anoFim = item.dtFimVal ? new Date(item.dtFimVal).getFullYear() : null;
-            
-            if (anoInic) {
-                if (!anosMap[anoInic]) anosMap[anoInic] = { inic: new Set(), enc: new Set(), emp: 0 };
-                anosMap[anoInic].inic.add(item.contrato);
-                anosMap[anoInic].emp += item.v_empenhado;
-            }
-            if (anoFim) {
-                if (!anosMap[anoFim]) anosMap[anoFim] = { inic: new Set(), enc: new Set(), emp: 0 };
-                anosMap[anoFim].enc.add(item.contrato);
-            }
+        let minYear = 9999;
+        let maxYear = 0;
+        filteredData.forEach(d => {
+            const yI = d.dtInicVal ? new Date(d.dtInicVal).getFullYear() : null;
+            const yF = d.dtFimVal ? new Date(d.dtFimVal).getFullYear() : null;
+            if (yI && yI < minYear) minYear = yI;
+            if (yF && yF > maxYear) maxYear = yF;
         });
-        return Object.keys(anosMap).sort().map(ano => ({
-            label: ano, iniciados: anosMap[ano].inic.size, encerrados: anosMap[ano].enc.size, empenhado: anosMap[ano].emp
-        }));
+        const anos = [];
+        if (minYear <= maxYear) { for(let y = minYear; y <= maxYear; y++) anos.push(y); }
+        
+        return anos.map(ano => {
+            let inic = 0, enc = 0, dur = 0, emp = 0;
+            filteredData.forEach(d => {
+                const yI = d.dtInicVal ? new Date(d.dtInicVal).getFullYear() : null;
+                const yF = d.dtFimVal ? new Date(d.dtFimVal).getFullYear() : null;
+                if (yI === ano) { inic++; emp += d.v_empenhado; }
+                if (yF === ano) enc++;
+                if (yI !== null && yF !== null && yI < ano && yF > ano) dur++;
+            });
+            return { label: ano, iniciados: inic, encerrados: enc, durante: dur, empenhado: emp };
+        });
     }, [filteredData]);
 
     const bubbleData = useMemo(() => {
         let maxEmp = 0;
         filteredData.forEach(d => { if (d.v_empenhado > maxEmp) maxEmp = d.v_empenhado; });
-        return filteredData.map(d => ({
-            x: d.p_liquidado * 100,
-            y: d.p_pago * 100,
-            r: maxEmp > 0 ? Math.max(4, (d.v_empenhado / maxEmp) * 25) : 4,
-            contrato: d.contrato,
-            fornecedor: d.fornecedor,
-            v_empenhado: d.v_empenhado,
-            v_liquidado: d.v_liquidado,
-            v_pago: d.v_pago,
-            p_liquidado: d.p_liquidado,
-            p_pago: d.p_pago
-        }));
-    }, [filteredData]);
+        return filteredData.filter(d => {
+            const mainTag = d.situacaoFlags.find(f => !['CAN','BLOQ'].includes(f.label)) || d.situacaoFlags[0];
+            const tagLabel = mainTag ? mainTag.label : 'OUTROS';
+            return !scatterHiddenTags.includes(tagLabel);
+        }).map(d => {
+            const mainTag = d.situacaoFlags.find(f => !['CAN','BLOQ'].includes(f.label)) || d.situacaoFlags[0];
+            const hexColor = mainTag ? mainTag.hex : '#94a3b8';
+            return {
+                x: Math.min(Math.max((d[scatterXAxis] || 0) * 100, -10), 110),
+                y: Math.min(Math.max((d.perc_tempo || 0) * 100, -10), 110),
+                r: maxEmp > 0 ? Math.max(4, (d.v_empenhado / maxEmp) * 25) : 4,
+                contrato: d.contrato,
+                fornecedor: d.fornecedor,
+                v_empenhado: d.v_empenhado,
+                situacao: d.situacao,
+                color: hexColor
+            };
+        });
+    }, [filteredData, scatterXAxis, scatterHiddenTags]);
 
     if (loading) return (
         <div className="h-screen flex flex-col items-center justify-center font-black text-slate-400 gap-4">
@@ -984,6 +1222,7 @@ function Dashboard() {
                 <div>
                     <h1 className="text-3xl font-black uppercase tracking-tighter text-slate-800">PAINEL GERAL DE CONTRATOS</h1>
                     <p className={`text-[11px] font-bold mt-1 ${status.includes("Erro") || status.includes("falhou") ? "text-red-600" : "text-emerald-600"}`}>● {status}</p>
+                    <p className="text-[11px] italic text-blue-600 mt-0.5">Produzido por Cel Brito.</p>
                 </div>
                 <div className="flex gap-2 items-center bg-white px-4 py-2 rounded-lg border shadow-sm">
                     <span className="text-[10px] font-black text-slate-400 uppercase">Carga Manual:</span>
@@ -999,21 +1238,30 @@ function Dashboard() {
                 <div className="mb-4 pb-4 border-b border-slate-100 flex flex-col gap-3">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações Rápidas:</span>
                     <div className="flex flex-wrap gap-2 items-center">
-                        <button onClick={() => setFInexecutados(!fInexecutados)} className={`text-[10px] font-bold uppercase px-4 py-2 rounded transition shadow-sm ${fInexecutados ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Inexecutados (&lt; 100%)</button>
-                        <button onClick={() => setFBloqueados(!fBloqueados)} className={`text-[10px] font-bold uppercase px-4 py-2 rounded transition shadow-sm ${fBloqueados ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Bloqueados (&gt; 0)</button>
-                        <button onClick={() => setFCancelados(!fCancelados)} className={`text-[10px] font-bold uppercase px-4 py-2 rounded transition shadow-sm ${fCancelados ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>Cancelados (&gt; 0)</button>
+                        {Object.entries(tagColorsMap).map(([label, config]) => {
+                            const isActive = fSituacaoTags.includes(label);
+                            return (
+                                <button key={label} onClick={() => toggleSituacaoTag(label)}
+                                    className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isActive ? config.css + ' border-transparent shadow-inner ring-2 ring-blue-400 ring-offset-1' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                                    {label}
+                                </button>
+                            );
+                        })}
                         <div className="w-px h-6 bg-slate-200 mx-2 hidden sm:block"></div>
-                        <button onClick={applyFilterCSup} className="text-[10px] font-bold uppercase bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition shadow-md">C SUP</button>
-                        <button onClick={applyFilterAcessoHoje} className="text-[10px] font-bold uppercase bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 transition shadow-md">A Partir de Hoje</button>
-                        <button onClick={clearAllFilters} className="text-[10px] font-bold uppercase bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-700 transition shadow-md">Limpar Filtros</button>
+                        <button onClick={toggleCSup} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isCSupActive ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>C SUP</button>
+                        <button onClick={toggleHoje} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isHojeActive ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>A Partir de Hoje</button>
+                        <button onClick={clearAllFilters} className="text-[9px] font-bold uppercase bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700 transition shadow-md border border-slate-800">Limpar Filtros</button>
                     </div>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
                     <MultiSelect label="FISCAL" options={[...new Set(rawData.map(r => r.fiscal))].sort()} selected={fFiscal} onChange={setFFiscal} />
                     <MultiSelect label="GESTOR" options={[...new Set(rawData.map(r => r.gestor))].sort()} selected={fGestor} onChange={setFGestor} />
+                    <MultiSelect label="F. SUBSTITUTO" options={[...new Set(rawData.map(r => r.fiscal_sub))].sort()} selected={fFiscalSub} onChange={setFFiscalSub} />
+                    <MultiSelect label="G. SUBSTITUTO" options={[...new Set(rawData.map(r => r.gestor_sub))].sort()} selected={fGestorSub} onChange={setFGestorSub} />
                     <MultiSelect label="SEC LOG" options={[...new Set(rawData.map(r => r.sec_log))].sort()} selected={fSecLog} onChange={setFSecLog} />
                     <MultiSelect label="CONTRATO" options={[...new Set(rawData.map(r => r.contrato))].sort()} selected={fContrato} onChange={setFContrato} />
                     <MultiSelect label="Nº COMPRA" options={[...new Set(rawData.map(r => r.compra))].sort()} selected={fCompra} onChange={setFCompra} />
+                    <MultiSelect label="MODALIDADE" options={[...new Set(rawData.map(r => r.modalidade))].sort()} selected={fModalidade} onChange={setFModalidade} />
                     <MultiSelect label="FORNECEDOR" options={[...new Set(rawData.map(r => r.fornecedor))].sort()} selected={fFornecedor} onChange={setFFornecedor} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
@@ -1025,14 +1273,14 @@ function Dashboard() {
             </div>
 
             <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 mb-4">
-                <KPICard title="Contratos" value={kpis.qtdContratos} color="slate" isCurrency={false} />
-                <KPICard title="Ativos" value={kpis.qtdAtivos} extraText={`Inexec: ${kpis.qtdAtivosInexec}\nEm Exec: ${kpis.qtdAtivosEmExec}\nExec Tot: ${kpis.qtdAtivosExecTot}\nExec Parc: ${kpis.qtdAtivosExecParc}`} color="blue" isCurrency={false} />
-                <KPICard title="Vencidos" value={kpis.qtdVencidos} extraText={`Inexec Tot: ${kpis.qtdVencInexecTot}\nExec Tot: ${kpis.qtdVencidosTot}\nExec Parc: ${kpis.qtdVencidosParc}`} color="slate" isCurrency={false} />
-                <KPICard title="Bloqueados" value={kpis.qtdBloqueados} color="orange" isCurrency={false} />
-                <KPICard title="Cancelados" value={kpis.qtdCancelados} color="red" isCurrency={false} />
-                <KPICard title="Gestores" value={kpis.qtdGestores} color="amber" isCurrency={false} />
-                <KPICard title="Fiscais" value={kpis.qtdFiscais} color="emerald" isCurrency={false} />
-                <KPICard title="Fornecedores" value={kpis.qtdFornecedores} color="violet" isCurrency={false} />
+                <KPICard title="QTD Contratos" value={kpis.qtdContratos} color="slate" isCurrency={false} />
+                <KPICard title="QTD Ativos" value={kpis.qtdAtivos} extraText={`Inexec: ${kpis.qtdAtivosInexec}\nEm Exec: ${kpis.qtdAtivosEmExec}\nExec Tot: ${kpis.qtdAtivosExecTot}\nExec Parc: ${kpis.qtdAtivosExecParc}`} color="blue" isCurrency={false} />
+                <KPICard title="QTD Vencidos" value={kpis.qtdVencidos} extraText={`Inexec Tot: ${kpis.qtdVencInexecTot}\nExec Tot: ${kpis.qtdVencidosTot}\nExec Parc: ${kpis.qtdVencidosParc}`} color="slate" isCurrency={false} />
+                <KPICard title="QTD Bloqueados" value={kpis.qtdBloqueados} color="orange" isCurrency={false} />
+                <KPICard title="QTD Cancelados" value={kpis.qtdCancelados} color="red" isCurrency={false} />
+                <KPICard title="QTD Gestores" value={kpis.qtdGestores} color="amber" isCurrency={false} />
+                <KPICard title="QTD Fiscais" value={kpis.qtdFiscais} color="emerald" isCurrency={false} />
+                <KPICard title="QTD Fornecedores" value={kpis.qtdFornecedores} color="violet" isCurrency={false} />
             </div>
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
                 <KPICard title="Empenhado" value={kpis.emp} color="blue" isCurrency={true} />
@@ -1046,11 +1294,11 @@ function Dashboard() {
 
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e Qtd. por Gestor</h3>
+                    <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e QTD por Gestor</h3>
                     <ChartComponent id="gGestor" type="bar" data={{
                         labels: gestorData.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
-                            { label: 'Qtd', data: gestorData.map(d => d.count), backgroundColor: '#eab308', xAxisID: 'x1', borderRadius: 4,
+                            { label: 'Quantidade', data: gestorData.map(d => d.count), backgroundColor: '#eab308', xAxisID: 'x1', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             },
                             { label: 'Empenhado', data: gestorData.map(d => d.total), backgroundColor: '#3b82f6', xAxisID: 'x', borderRadius: 4,
@@ -1060,11 +1308,11 @@ function Dashboard() {
                     }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 20, scaleID: 'x1' }, datalabels: { display: false } }, scales: { x: { ticks: { callback: v => shortenNumber(v) } }, x1: { position: 'top', grid: { display: false } } } }} />
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e Qtd. por Fiscal</h3>
+                    <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e QTD por Fiscal</h3>
                     <ChartComponent id="gFiscal" type="bar" data={{
                         labels: fiscalData.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
-                            { label: 'Qtd', data: fiscalData.map(d => d.count), backgroundColor: '#f97316', xAxisID: 'x1', borderRadius: 4,
+                            { label: 'Quantidade', data: fiscalData.map(d => d.count), backgroundColor: '#f97316', xAxisID: 'x1', borderRadius: 4,
                               datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                             },
                             { label: 'Empenhado', data: fiscalData.map(d => d.total), backgroundColor: '#22c55e', xAxisID: 'x', borderRadius: 4,
@@ -1075,72 +1323,67 @@ function Dashboard() {
                 </div>
             </div>
 
+            {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 1) */}
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
-                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (Mod)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pModV" type="pie" data={{ labels: modDataV.map(d => d.label), datasets: [{ label: 'Valor Empenhado', data: modDataV.map(d => d.total), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
-                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Qtd. Contratos (Mod)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pModQ" type="pie" data={{ labels: modDataQ.map(d => d.label), datasets: [{ label: 'Qtd. Contratos', data: modDataQ.map(d => d.count), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
-                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (SEC)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pSecV" type="pie" data={{ labels: secDataV.map(d => d.label), datasets: [{ label: 'Valor Empenhado', data: secDataV.map(d => d.total), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
-                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Qtd. Contratos (SEC)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pSecQ" type="pie" data={{ labels: secDataQ.map(d => d.label), datasets: [{ label: 'Qtd. Contratos', data: secDataQ.map(d => d.count), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
-                </div>
+                <ToggleableChartCard id="pModV" title="Empenhado (Mod)" data={modDataV} pieMetric="total" />
+                <ToggleableChartCard id="pModQ" title="QTD Contratos (Mod)" data={modDataQ} pieMetric="count" />
+                <ToggleableChartCard id="pSecV" title="Empenhado (SEC)" data={secDataV} pieMetric="total" />
+                <ToggleableChartCard id="pSecQ" title="QTD Contratos (SEC)" data={secDataQ} pieMetric="count" />
             </div>
 
+            {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 2) */}
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+                <ToggleableChartCard id="pCompV" title="Empenhado (Nr Compra)" data={compraDataV} pieMetric="total" />
+                <ToggleableChartCard id="pCompQ" title="QTD Contratos (Nr Compra)" data={compraDataQ} pieMetric="count" />
+                <ToggleableChartCard id="pFornV" title="Empenhado (Fornecedor)" data={fornPieDataV} pieMetric="total" isFornecedor={true} />
+                <ToggleableChartCard id="pFornQ" title="QTD Contratos (Fornecedor)" data={fornPieDataQ} pieMetric="count" isFornecedor={true} />
+            </div>
+
+            {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 3 - NOVO) */}
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
-                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (Nr Compra)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pCompV" type="pie" data={{ labels: compraDataV.map(d => d.label), datasets: [{ label: 'Valor Empenhado', data: compraDataV.map(d => d.total), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
-                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Qtd. Contratos (Nr Compra)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pCompQ" type="pie" data={{ labels: compraDataQ.map(d => d.label), datasets: [{ label: 'Qtd. Contratos', data: compraDataQ.map(d => d.count), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
-                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (Fornecedor)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pFornV" type="pie" data={{ labels: fornPieDataV.map(d => d.label), datasets: [{ label: 'Valor Empenhado', data: fornPieDataV.map(d => d.total), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
-                </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
-                    <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Qtd. Contratos (Fornecedor)</h3>
-                    <div className="w-full h-56"><ChartComponent id="pFornQ" type="pie" data={{ labels: fornPieDataQ.map(d => d.label), datasets: [{ label: 'Qtd. Contratos', data: fornPieDataQ.map(d => d.count), backgroundColor: pieColors }] }} options={getPieOptions()} /></div>
-                </div>
+                <ToggleableChartCard id="pAnoVigV" title="Empenhado (Ano Vig Ini)" data={anoVigIniDataV} pieMetric="total" />
+                <ToggleableChartCard id="pAnoVigQ" title="QTD Contratos (Ano Vig Ini)" data={anoVigIniDataQ} pieMetric="count" />
+                <ToggleableChartCard id="pSitV" title="Empenhado (Situação)" data={situacaoDataV} pieMetric="total" />
+                <ToggleableChartCard id="pSitQ" title="QTD Contratos (Situação)" data={situacaoDataQ} pieMetric="count" />
             </div>
 
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-xs font-black text-slate-800 uppercase">Valor Empenhado e Qtd. por Fornecedor (Top 20)</h3>
-                        <select value={fornecedorSort} onChange={(e) => setFornecedorSort(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
-                            <option value="valor_desc">Maior Valor</option><option value="qtd_desc">Maior Qtd</option><option value="nome_asc">Ordem A-Z</option>
-                        </select>
+                        <h3 className="text-xs font-black text-slate-800 uppercase">EXECUÇÃO ORÇAMENTÁRIA E QTD (TOP 20)</h3>
+                        <div className="flex gap-2 items-center">
+                            <select value={top20Sort} onChange={(e) => setTop20Sort(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
+                                <option value="valor_desc">Maior Valor</option><option value="qtd_desc">Maior QTD</option><option value="nome_asc">Ordem A-Z</option>
+                            </select>
+                            <button onClick={() => setTop20ViewMode(top20ViewMode === 'fornecedor' ? 'contrato' : 'fornecedor')} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer">
+                                {top20ViewMode === 'fornecedor' ? '► VER POR CONTRATO' : '► VER POR FORNECEDOR'}
+                            </button>
+                        </div>
                     </div>
                     <div className="h-[400px]">
-                        <ChartComponent id="gForn" type="bar" data={{
-                            labels: fornecedorChartData.map(d => formatLabelMultiLine(d.label)),
+                        <ChartComponent id="gTop20" type="bar" data={{
+                            labels: top20DataProcessed.map(d => formatLabelMultiLine(top20ViewMode === 'fornecedor' ? d.label.replace(/^[\d\.\-\/]+\s*-\s*/, '') : d.label)),
                             datasets: [
-                                { 
-                                    label: 'Qtd. Contratos', data: fornecedorChartData.map(d => d.count), backgroundColor: '#f97316', yAxisID: 'y1', borderRadius: 4, type: 'bar',
-                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => v }
-                                },
-                                { 
-                                    label: 'Valor Empenhado', data: fornecedorChartData.map(d => d.total), backgroundColor: '#3b82f6', yAxisID: 'y', borderRadius: 4,
-                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
-                                },
-                                { 
-                                    label: 'Executado Líquido', data: fornecedorChartData.map(d => d.pago), backgroundColor: '#8b5cf6', yAxisID: 'y', borderRadius: 4, type: 'bar',
-                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
-                                }
+                                { label: 'Empenhado', data: top20DataProcessed.map(d => d.total), backgroundColor: '#3b82f6', yAxisID: 'y', borderRadius: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                                { label: 'Liquidado', data: top20DataProcessed.map(d => d.liquidado), backgroundColor: '#f59e0b', yAxisID: 'y', borderRadius: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                                { label: 'Executado', data: top20DataProcessed.map(d => d.executado), backgroundColor: '#22c55e', yAxisID: 'y', borderRadius: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                                { label: 'Pago', data: top20DataProcessed.map(d => d.pago), backgroundColor: '#10b981', yAxisID: 'y', borderRadius: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                                { label: 'Bloqueado', data: top20DataProcessed.map(d => d.bloqueado), backgroundColor: '#f97316', yAxisID: 'y', borderRadius: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                                { label: 'Cancelado', data: top20DataProcessed.map(d => d.cancelado), backgroundColor: '#ef4444', yAxisID: 'y', borderRadius: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                                ...(top20ViewMode === 'fornecedor' ? [{ label: 'Quantidade', data: top20DataProcessed.map(d => d.count), backgroundColor: '#8b5cf6', yAxisID: 'y1', borderRadius: 4, type: 'line', borderWidth: 2, pointRadius: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', rotation: -90, align: 'bottom', anchor: 'start', font: { size: 9, weight: 'bold' } } }] : [])
                             ]
                         }} options={{ 
-                            indexAxis: 'x', responsive: true, maintainAspectRatio: false, plugins: { tooltip: getFullTooltipFornecedor(fornecedorChartData), datalabels: { display: false } },
-                            scales: { x: { ticks: { maxRotation: 90, minRotation: 45, font: { size: 9, weight: 'bold' }, autoSkip: false } }, y: { position: 'left', ticks: { callback: v => shortenNumber(v) } }, y1: { position: 'right', grid: { display: false } } } 
+                            indexAxis: 'x', responsive: true, maintainAspectRatio: false, 
+                            plugins: { 
+                                tooltip: top20ViewMode === 'fornecedor' ? getFullTooltipFornecedor(top20DataProcessed) : tooltipCallback, 
+                                datalabels: { display: false },
+                                legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 } } }
+                            },
+                            scales: { 
+                                x: { ticks: { maxRotation: 90, minRotation: 45, font: { size: 9, weight: 'bold' }, autoSkip: false } }, 
+                                y: { position: 'left', ticks: { callback: v => shortenNumber(v) }, title: { display: true, text: 'Valores (R$)', font: { size: 8 } } }, 
+                                y1: { display: top20ViewMode === 'fornecedor', position: 'right', grid: { display: false }, title: { display: true, text: 'Quantidade', font: { size: 8 } } } 
+                            } 
                         }} />
                     </div>
                 </div>
@@ -1148,7 +1391,7 @@ function Dashboard() {
             
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-xs font-black text-slate-800 uppercase mb-6">Evolução por Ano (Iniciados, Encerrados e Empenhado)</h3>
+                    <h3 className="text-xs font-black text-slate-800 uppercase mb-6">Evolução por Ano (Iniciados, Encerrados, Durante e Empenhado)</h3>
                     <div className="h-[400px]">
                         <ChartComponent id="gAno" type="bar" data={{
                             labels: dataByAno.map(d => d.label),
@@ -1159,6 +1402,10 @@ function Dashboard() {
                                 },
                                 {
                                     label: 'Contratos Encerrados', data: dataByAno.map(d => d.encerrados), backgroundColor: '#ef4444', yAxisID: 'y_qtd', borderRadius: 4,
+                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: -90, font: { size: 10, weight: 'bold' }, formatter: v => v }
+                                },
+                                {
+                                    label: 'Contratos Durante', data: dataByAno.map(d => d.durante), backgroundColor: '#8b5cf6', yAxisID: 'y_qtd', borderRadius: 4,
                                     datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: -90, font: { size: 10, weight: 'bold' }, formatter: v => v }
                                 },
                                 { 
@@ -1238,29 +1485,68 @@ function Dashboard() {
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-xs font-black text-slate-800 uppercase">Correlação: % Liquidado vs % Pago (Tamanho da bolha: Empenhado)</h3>
+                        <h3 className="text-xs font-black text-slate-800 uppercase">
+                            Correlação: {scatterXAxis === 'p_executado' ? '% Executado' : scatterXAxis === 'p_liquidado' ? '% Liquidado' : '% Pago'} vs % Tempo (Tamanho da bolha: Empenhado)
+                        </h3>
+                        <select value={scatterXAxis} onChange={(e) => setScatterXAxis(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-3 py-1.5 outline-none">
+                            <option value="p_executado">% Executado</option>
+                            <option value="p_liquidado">% Liquidado</option>
+                            <option value="p_pago">% Pago</option>
+                        </select>
                     </div>
                     <div className="h-[450px]">
                         <ChartComponent id="gScatter" type="bubble" data={{
                             datasets: [{
                                 label: 'Contratos',
                                 data: bubbleData,
-                                backgroundColor: 'rgba(14, 165, 233, 0.6)', 
-                                borderColor: 'rgba(14, 165, 233, 1)',
+                                backgroundColor: context => context.raw ? context.raw.color : 'rgba(14, 165, 233, 0.6)', 
+                                borderColor: '#ffffff',
                                 borderWidth: 1
                             }]
                         }} options={{
                             responsive: true, maintainAspectRatio: false,
                             plugins: { 
-                                tooltip: getBubbleTooltip(), 
+                                tooltip: getBubbleTooltip(scatterXAxis === 'p_executado' ? '% Executado' : scatterXAxis === 'p_liquidado' ? '% Liquidado' : '% Pago'), 
                                 datalabels: { display: false }, 
                                 legend: { display: false } 
                             },
                             scales: {
-                                x: { title: { display: true, text: '% Liquidado', font: { weight: 'bold' } }, min: 0 },
-                                y: { title: { display: true, text: '% Pago', font: { weight: 'bold' } }, min: 0 }
+                                x: { 
+                                    title: { display: true, text: scatterXAxis === 'p_executado' ? '% Executado' : scatterXAxis === 'p_liquidado' ? '% Liquidado' : '% Pago', font: { weight: 'bold' } }, 
+                                    min: -10, 
+                                    max: 110,
+                                    ticks: {
+                                        callback: function(value) {
+                                            if (value >= 0 && value <= 100) return value + '%';
+                                            return null;
+                                        }
+                                    }
+                                },
+                                y: { 
+                                    title: { display: true, text: '% Tempo', font: { weight: 'bold' } }, 
+                                    min: -10, 
+                                    max: 110,
+                                    ticks: {
+                                        callback: function(value) {
+                                            if (value >= 0 && value <= 100) return value + '%';
+                                            return null;
+                                        }
+                                    }
+                                }
                             }
                         }} />
+                    </div>
+                    {/* Legenda Customizada do Scatter Plot (Interativa) */}
+                    <div className="mt-4 flex flex-wrap gap-3 justify-center border-t border-slate-100 pt-4">
+                        {Object.keys(tagColorsMap).map(k => {
+                            const isHidden = scatterHiddenTags.includes(k);
+                            return (
+                                <div key={k} onClick={() => toggleScatterTag(k)} className={`flex items-center gap-1 cursor-pointer transition ${isHidden ? 'opacity-30 grayscale' : 'hover:opacity-80'}`}>
+                                    <div className="w-3 h-3 rounded-full border border-slate-200" style={{ backgroundColor: tagColorsMap[k].hex }}></div>
+                                    <span className={`text-[9px] font-bold ${isHidden ? 'text-slate-400 line-through' : 'text-slate-600'}`}>{k}</span>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             </div>
@@ -1284,12 +1570,13 @@ function Dashboard() {
                                 <TextHeader widthClass="w-[6%]" label="Situação" field="situacao" current={sortConfig} onSort={handleSort} searchVal={searchSituacao} onSearchChange={setSearchSituacao} />
                                 <TextHeader widthClass="w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />
                                 <TextHeader widthClass="w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />
-                                <TextHeader widthClass="w-[7%]" label="Gestor/Fiscal" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />
+                                <TextHeader widthClass="w-[7%]" label="Gestores/Fiscais" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />
                                 <DateFilterHeader widthClass="w-[5%]" label="Início" field="data_inic" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />
                                 <DateFilterHeader widthClass="w-[5%]" label="Fim" field="data_fim" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />
                                 <NumericHeader widthClass="w-[6%]" label="% Tempo" field="perc_tempo" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
                                 <NumericHeader widthClass="w-[5%]" label="Passaram" field="dias_passaram" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
                                 <NumericHeader widthClass="w-[5%]" label="Faltam" field="encerrando_dias" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
+                                <NumericHeader widthClass="w-[6%]" label="GLOBAL-EMP" field="dif_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
                                 <NumericHeader widthClass="w-[6%]" label="Global" field="v_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
                                 <NumericHeader widthClass="w-[6%]" label="Empenhado" field="v_empenhado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
                                 <NumericHeader widthClass="w-[6%]" label="Liquidado" field="v_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
@@ -1322,15 +1609,22 @@ function Dashboard() {
                                     </td>
                                     <td className="p-3 text-slate-600 font-bold break-words">{row.fornecedor}</td>
                                     <td className="p-3 text-slate-500 break-words">{row.objeto}</td>
-                                    <td className="p-3 break-words"><div className="font-bold text-slate-700">{row.gestor}</div><div className="text-[9px] text-slate-400">{row.fiscal}</div></td>
+                                    <td className="p-3 break-words">
+                                        <div className="font-bold text-slate-700" title="Gestor Titular">GT: {row.gestor}</div>
+                                        {row.gestor_sub !== 'N/I' && <div className="text-[9px] text-slate-500" title="Gestor Substituto">GS: {row.gestor_sub}</div>}
+                                        <div className="font-bold text-slate-700 mt-1" title="Fiscal Titular">FT: {row.fiscal}</div>
+                                        {row.fiscal_sub !== 'N/I' && <div className="text-[9px] text-slate-500" title="Fiscal Substituto">FS: {row.fiscal_sub}</div>}
+                                    </td>
                                     <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_inic || "-"}</td>
                                     <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_fim || "-"}</td>
                                     <td className="p-3 align-middle">{row.perc_tempo !== null ? (<div className="flex items-center gap-1"><div className="w-full bg-slate-200 rounded-full h-1.5 flex-1 overflow-hidden"><div className={`h-1.5 rounded-full ${row.perc_tempo >= 1 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(Math.max(row.perc_tempo * 100, 0), 100)}%` }}></div></div><span className="text-[8px] font-bold text-slate-600 min-w-[30px] text-right">{formatPercentBR(row.perc_tempo)}</span></div>) : "-"}</td>
                                     <td className="p-3 text-center font-bold text-slate-600">{row.dias_passaram !== null ? `${row.dias_passaram} d` : "-"}</td>
                                     <td className={`p-3 text-center font-bold ${row.encerrando_dias < 0 ? 'text-red-500' : 'text-emerald-600'}`}>{row.encerrando_dias !== null ? `${row.encerrando_dias} d` : "-"}</td>
+                                    <td className={`p-3 text-right font-bold ${row.dif_global < 0 ? 'text-red-500' : (row.dif_global > 0 ? 'text-emerald-600' : 'text-slate-500')} bg-slate-50/30`}>
+                                        {formatBRL(row.dif_global)}
+                                    </td>
                                     <td className="p-3 text-right font-bold text-slate-700 bg-slate-50/30">
                                         {formatBRL(row.v_global)}
-                                        <div className="text-[8px] font-normal text-slate-500 mt-1 leading-tight" title="Dif. (Global - Empenhado Total do Contrato)">Dif: {formatBRL(row.v_global - row.contrato_empenhado_total)}</div>
                                     </td>
                                     <td className="p-3 text-right font-bold text-blue-700">{formatBRL(row.v_empenhado)}</td>
                                     <td className="p-3 text-right font-bold text-amber-600">{formatBRL(row.v_liquidado)}</td>
@@ -1350,7 +1644,7 @@ function Dashboard() {
                         </tbody>
                         <tfoot className="bg-slate-200 sticky bottom-0 border-t-2 border-slate-400 shadow-md z-10">
                             <tr className="text-slate-800 uppercase font-black">
-                                <td colSpan="10" className="p-3 text-right">TOTAIS (Filtro Atual):</td>
+                                <td colSpan="12" className="p-3 text-right">TOTAIS (Filtro Atual):</td>
                                 <td className="p-3 text-right text-blue-800">{formatBRL(totalsMaster.emp)}</td>
                                 <td className="p-3 text-right text-amber-800">{formatBRL(totalsMaster.liq)}</td>
                                 <td className="p-3 text-center">-</td>
