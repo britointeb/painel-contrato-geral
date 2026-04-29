@@ -1,6 +1,5 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
-// Registar plugins globais do Chart.js apenas uma vez
 if (window.ChartDataLabels) {
     Chart.register(ChartDataLabels);
     Chart.defaults.set('plugins.datalabels', { display: false });
@@ -32,7 +31,7 @@ const customLinePlugin = {
 };
 Chart.register(customLinePlugin);
 
-// Função global para gerar um preenchimento achurado em canvas (usado na barra Liquidado)
+// Função global para gerar um preenchimento achurado em canvas
 const patternCache = {};
 const getHatchPattern = (color) => {
     if (patternCache[color]) return patternCache[color];
@@ -52,14 +51,7 @@ const getHatchPattern = (color) => {
     return patternCache[color];
 };
 
-// Lógica de Cores Semânticas das Barras de Execução/Liquidação
-const getSemanticColor = (p_value) => {
-    if (p_value >= 0.999) return '#22c55e'; // Verde
-    if (p_value >= 0.5) return '#eab308';   // Amarelo
-    return '#ef4444';                       // Vermelho
-};
-
-// Paleta base para Pizzas (Até 10 cores, a última geralmente será "OUTROS")
+// Paleta base para Pizzas
 const pieColors = ['#3b82f6', '#eab308', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#14b8a6', '#f43f5e', '#6366f1', '#94a3b8'];
 
 const decodeBinary = (binStr) => {
@@ -72,7 +64,6 @@ const decodeBinary = (binStr) => {
     } catch(e) { return ''; }
 };
 
-// Normalizador Extremo: Destrói acentos, espaços, _ e -, mantendo apenas letras, números e '%' para comparação perfeita.
 const normalizeStr = (str) => {
     if (!str) return "";
     return str.toString()
@@ -148,9 +139,6 @@ const formatLabelMultiLine = (text, maxLength = 18) => {
     return lines;
 };
 
-// =========================================================
-// SISTEMA GLOBAL DE EXPORTAÇÃO
-// =========================================================
 const exportTable = {
     toExcel: (data, filename, columns) => {
         if (!window.XLSX) { alert("Biblioteca Excel não encontrada."); return; }
@@ -218,16 +206,18 @@ const exportTable = {
 };
 
 const exportMasterColumns = [
-    { header: "CONTRATO", key: "contrato" }, { header: "FORNECEDOR", key: "fornecedor" }, { header: "OBJETO", key: "objeto" },
-    { header: "GESTOR", key: "gestor" }, { header: "FISCAL", key: "fiscal" }, { header: "COMPRA", key: "compra" }, 
-    { header: "MODALIDADE", key: "modalidade" }, { header: "INÍCIO", key: "data_inic" }, { header: "FIM", key: "data_fim" }, 
-    { header: "% TEMPO", key: "perc_tempo", isPercent: true }, { header: "PASSARAM", key: "dias_passaram" }, { header: "FALTAM", key: "encerrando_dias" },
+    { header: "CONTRATO", key: "contrato" }, { header: "SITUAÇÃO", key: "situacao" }, { header: "FORNECEDOR", key: "fornecedor" }, 
+    { header: "OBJETO", key: "objeto" }, { header: "GESTOR", key: "gestor" }, { header: "FISCAL", key: "fiscal" }, 
+    { header: "COMPRA", key: "compra" }, { header: "MODALIDADE", key: "modalidade" }, { header: "INÍCIO", key: "data_inic" }, 
+    { header: "FIM", key: "data_fim" }, { header: "% TEMPO", key: "perc_tempo", isPercent: true }, 
+    { header: "PASSARAM", key: "dias_passaram" }, { header: "FALTAM", key: "encerrando_dias" },
     { header: "GLOBAL", key: "v_global", isCurrency: true }, { header: "EMPENHADO", key: "v_empenhado", isCurrency: true },
     { header: "LIQUIDADO", key: "v_liquidado", isCurrency: true }, { header: "LIQ %", key: "p_liquidado", isPercent: true },
     { header: "PAGO", key: "v_pago", isCurrency: true }, { header: "PAGO %", key: "p_pago", isPercent: true },
     { header: "BLOQUEADO", key: "v_bloqueado", isCurrency: true }, { header: "BLOQ %", key: "p_bloqueado", isPercent: true },
     { header: "CANCELADO", key: "v_cancelado", isCurrency: true }, { header: "CANC %", key: "p_cancelado", isPercent: true },
-    { header: "EXECUTADO", key: "v_executado", isCurrency: true }, { header: "EXEC %", key: "p_executado", isPercent: true }
+    { header: "EXECUTADO", key: "v_executado", isCurrency: true }, { header: "EXEC %", key: "p_executado", isPercent: true },
+    { header: "EXEC LIQ", key: "v_pago", isCurrency: true }, { header: "EXEC LIQ %", key: "p_pago", isPercent: true }
 ];
 
 const tooltipCallback = {
@@ -387,7 +377,7 @@ const ChartComponent = ({ type, data, options, id }) => {
     return <canvas ref={canvasRef}></canvas>;
 };
 
-function KPICard({ title, value, subValue, diffValue, diffLabel, color, isCurrency }) {
+function KPICard({ title, value, subValue, diffValue, diffLabel, extraText, color, isCurrency }) {
     const colors = { 
         slate: "border-slate-800 text-slate-800", 
         blue: "border-blue-500 text-blue-700", 
@@ -395,9 +385,22 @@ function KPICard({ title, value, subValue, diffValue, diffLabel, color, isCurren
         emerald: "border-emerald-500 text-emerald-600",
         violet: "border-violet-500 text-violet-700",
         red: "border-red-500 text-red-600",
-        orange: "border-orange-500 text-orange-600"
+        orange: "border-orange-500 text-orange-600",
+        teal: "border-teal-500 text-teal-700",
+        cyan: "border-cyan-500 text-cyan-700"
     };
     const mainText = isCurrency ? formatBRL(value) : value.toLocaleString('pt-BR');
+    
+    const renderExtraText = () => {
+        if (!extraText) return null;
+        const lines = extraText.split('\n');
+        return (
+            <div className="text-[9.5px] font-bold text-slate-500 mt-2 leading-[1.1] border-t border-slate-100 pt-1">
+                {lines.map((line, idx) => <div key={idx}>{line}</div>)}
+            </div>
+        );
+    };
+
     return (
         <div className={`bg-white p-3 sm:p-5 rounded-2xl border-t-8 shadow-md flex flex-col justify-center overflow-hidden min-w-0 ${colors[color]}`}>
             <h3 className="text-[10px] font-black uppercase tracking-widest opacity-50 mb-1 truncate" title={title}>{title}</h3>
@@ -411,6 +414,7 @@ function KPICard({ title, value, subValue, diffValue, diffLabel, color, isCurren
                 {subValue !== undefined && (
                     <span className="text-[10px] font-bold opacity-70 mt-1">{formatPercentBR(subValue)} do Empenhado</span>
                 )}
+                {renderExtraText()}
             </div>
         </div>
     );
@@ -538,7 +542,7 @@ function Dashboard() {
     const [fSecLog, setFSecLog] = useState([]);
     const [fContrato, setFContrato] = useState([]);
     const [fFornecedor, setFFornecedor] = useState([]);
-    const [fCompra, setFCompra] = useState([]); // Novo Filtro Dinâmico
+    const [fCompra, setFCompra] = useState([]); 
     
     const [dInicDe, setDInicDe] = useState("");
     const [dInicAte, setDInicAte] = useState("");
@@ -546,6 +550,7 @@ function Dashboard() {
     const [dFimAte, setDFimAte] = useState("");
 
     const [searchContrato, setSearchContrato] = useState("");
+    const [searchSituacao, setSearchSituacao] = useState("");
     const [searchFornecedor, setSearchFornecedor] = useState("");
     const [searchObjeto, setSearchObjeto] = useState("");
     const [searchGestorFiscal, setSearchGestorFiscal] = useState("");
@@ -571,7 +576,7 @@ function Dashboard() {
     const clearAllFilters = () => {
         setFFiscal([]); setFGestor([]); setFSecLog([]); setFContrato([]); setFFornecedor([]); setFCompra([]);
         setDInicDe(""); setDInicAte(""); setDFimDe(""); setDFimAte("");
-        setSearchContrato(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
+        setSearchContrato(""); setSearchSituacao(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
         setFInexecutados(false); setFBloqueados(false); setFCancelados(false); 
         setNumFilters(initialNumFilters); setDateFilters(initialDateFilters);
     };
@@ -595,7 +600,7 @@ function Dashboard() {
         const headers = rowsArray[0];
         const hoje = new Date(); hoje.setHours(0,0,0,0);
 
-        const mapped = rowsArray.slice(1).map(row => {
+        const mappedRaw = rowsArray.slice(1).map(row => {
             const getVal = (exactNames, fallbackKeywords = []) => {
                 let nameArr = Array.isArray(exactNames) ? exactNames : [exactNames];
                 for (let name of nameArr) {
@@ -637,6 +642,7 @@ function Dashboard() {
                 dias_passaram: diasPassaram, perc_tempo: percTempo, encerrando_dias: diasRestantes,
                 
                 v_global: parseValue(getVal(["Valor Global"])), v_empenhado: parseValue(getVal(["TOTAL EMPENHADO"])),
+                v_recebido: parseValue(getVal(["TOTAL RECEBIDO", "VALOR RECEBIDO", "RECEBIDO"], ["recebido"])),
                 v_liquidado: parseValue(getVal(["TOTAL LIQUIDADO"])), v_pago: parseValue(getVal(["TOTAL PAGO"])),
                 v_bloqueado: parseValue(getVal(["TOTAL BLOQUEADO"])), v_cancelado: parseValue(getVal(["TOTAL CANCELADO"])),
                 v_executado: parseValue(getVal(["TOTAL EXECUTADO"])), p_liquidado: parsePercentAsFloat(getVal(["TOTAL LIQUIDADO %"])),
@@ -644,10 +650,80 @@ function Dashboard() {
                 p_cancelado: parsePercentAsFloat(getVal(["TOTAL CANCELADO %"])), p_executado: parsePercentAsFloat(getVal(["TOTAL EXECUTADO %"]))
             };
         }).filter(r => r.contrato !== "-" && r.fornecedor !== "-");
+
+        // Agregação para definição das Situações Globais Exatas
+        const cTotals = {};
+        mappedRaw.forEach(r => {
+            if (!cTotals[r.contrato]) cTotals[r.contrato] = { v_empenhado: 0, v_recebido: 0, v_liquidado: 0, v_pago: 0, v_executado: 0, v_bloqueado: 0, v_cancelado: 0, encerrando_dias: r.encerrando_dias };
+            cTotals[r.contrato].v_empenhado += r.v_empenhado || 0;
+            cTotals[r.contrato].v_recebido += r.v_recebido || 0;
+            cTotals[r.contrato].v_liquidado += r.v_liquidado || 0;
+            cTotals[r.contrato].v_pago += r.v_pago || 0;
+            cTotals[r.contrato].v_executado += r.v_executado || 0;
+            cTotals[r.contrato].v_bloqueado += r.v_bloqueado || 0;
+            cTotals[r.contrato].v_cancelado += r.v_cancelado || 0;
+            if (r.encerrando_dias !== null) {
+                cTotals[r.contrato].encerrando_dias = r.encerrando_dias;
+            }
+        });
+
+        // NOVA LÓGICA DE ÁRVORE DE DECISÃO DAS TAGS (E SOMENTE ESSAS)
+        mappedRaw.forEach(r => {
+            const c = cTotals[r.contrato];
+            r.contrato_empenhado_total = c.v_empenhado;
+            
+            let flags = [];
+            let sitText = "";
+            
+            // TAGs Independentes
+            if (c.v_cancelado > 0) { flags.push({ label: 'CAN', color: 'bg-red-600 text-white' }); sitText += "CAN "; }
+            if (c.v_bloqueado > 0) { flags.push({ label: 'BLOQ', color: 'bg-orange-500 text-white' }); sitText += "BLOQ "; }
+            
+            // Fluxo Principal Mútuo Exclusivo (E SOMENTE ESTAS TAGS)
+            if (c.encerrando_dias !== null) {
+                const isAtivo = c.encerrando_dias >= 0;
+                
+                const isLiquidadoZero = c.v_liquidado <= 0.01;
+                const isPagoZero = c.v_pago <= 0.01;
+                const isPagoIgualEmpenhado = c.v_pago >= (c.v_empenhado - 0.01) && c.v_empenhado > 0;
+                const isExecutadoIgualEmpenhado = c.v_executado >= (c.v_empenhado - 0.01) && c.v_empenhado > 0;
+                const isPagoMenorEmpenhado = c.v_pago < (c.v_empenhado - 0.01);
+                const isExecutadoMenorEmpenhado = c.v_executado < (c.v_empenhado - 0.01);
+
+                if (isAtivo) {
+                    if (isLiquidadoZero) {
+                        flags.push({ label: 'ATIVO INEXEC', color: 'bg-purple-700 text-white' });
+                        sitText += "ATIVO INEXEC ";
+                    } else if (isExecutadoMenorEmpenhado) {
+                        flags.push({ label: 'ATIVO EM EXEC', color: 'bg-cyan-500 text-slate-900' });
+                        sitText += "ATIVO EM EXEC ";
+                    } else if (isPagoIgualEmpenhado) {
+                        flags.push({ label: 'ATIVO EXEC TOT', color: 'bg-blue-800 text-white' });
+                        sitText += "ATIVO EXEC TOT ";
+                    } else if (isPagoMenorEmpenhado && isExecutadoIgualEmpenhado) {
+                        flags.push({ label: 'ATIVO EXEC PARC', color: 'bg-sky-400 text-slate-900' });
+                        sitText += "ATIVO EXEC PARC ";
+                    }
+                } else {
+                    if (isPagoZero) {
+                        flags.push({ label: 'VENC INEXEC TOT', color: 'bg-rose-900 text-white' });
+                        sitText += "VENC INEXEC TOT ";
+                    } else if (isPagoIgualEmpenhado) {
+                        flags.push({ label: 'VENC EXEC TOT', color: 'bg-green-600 text-white' });
+                        sitText += "VENC EXEC TOT ";
+                    } else if (isPagoMenorEmpenhado && isExecutadoIgualEmpenhado) {
+                        flags.push({ label: 'VENC EXEC PARC', color: 'bg-yellow-500 text-slate-900' });
+                        sitText += "VENC EXEC PARC ";
+                    }
+                }
+            }
+            r.situacaoFlags = flags;
+            r.situacao = sitText.trim();
+        });
         
-        setRawData(mapped);
+        setRawData(mappedRaw);
         if (!fromCache) {
-            try { localStorage.setItem('dashData_PainelGeral', JSON.stringify(mapped)); } catch(e) {}
+            try { localStorage.setItem('dashData_PainelGeral', JSON.stringify(mappedRaw)); } catch(e) {}
         }
         setLoading(false);
     };
@@ -699,9 +775,8 @@ function Dashboard() {
             if (dateFilters.data_fim.min && item.dtFimVal < new Date(dateFilters.data_fim.min + "T00:00:00").getTime()) mDateTbl = false;
             if (dateFilters.data_fim.max && item.dtFimVal > new Date(dateFilters.data_fim.max + "T23:59:59").getTime()) mDateTbl = false;
 
-            // Busca Múltipla expandida
             const sCont = !searchContrato || item.contrato.includes(searchContrato.toUpperCase()) || item.compra.includes(searchContrato.toUpperCase()) || item.modalidade.includes(searchContrato.toUpperCase());
-            
+            const sSit = !searchSituacao || item.situacao.includes(searchSituacao.toUpperCase());
             const sForn = !searchFornecedor || item.fornecedor.includes(searchFornecedor.toUpperCase());
             const sObj = !searchObjeto || item.objeto.includes(searchObjeto.toUpperCase());
             const sGest = !searchGestorFiscal || item.gestor.includes(searchGestorFiscal.toUpperCase()) || item.fiscal.includes(searchGestorFiscal.toUpperCase());
@@ -715,7 +790,7 @@ function Dashboard() {
                 if (numFilters[key].min !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) < parseFloat(numFilters[key].min)) { mNum = false; break; }
                 if (numFilters[key].max !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) > parseFloat(numFilters[key].max)) { mNum = false; break; }
             }
-            return mFisc && mGest && mSec && mCont && mForn && mCompra && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sForn && sObj && sGest && mNum;
+            return mFisc && mGest && mSec && mCont && mForn && mCompra && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sForn && sObj && sGest && mNum;
         });
 
         if (sortConfig.key) {
@@ -732,28 +807,55 @@ function Dashboard() {
             });
         }
         return filtered;
-    }, [rawData, fFiscal, fGestor, fSecLog, fContrato, fFornecedor, fCompra, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fInexecutados, fBloqueados, fCancelados]);
+    }, [rawData, fFiscal, fGestor, fSecLog, fContrato, fFornecedor, fCompra, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fInexecutados, fBloqueados, fCancelados]);
 
     const totalsMaster = useMemo(() => {
-        let emp = 0, liq = 0, pag = 0, blo = 0, can = 0;
-        filteredData.forEach(r => { emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; });
-        return { emp, liq, pag, blo, can };
+        let emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0;
+        filteredData.forEach(r => { emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; });
+        return { emp, liq, pag, blo, can, exe };
     }, [filteredData]);
 
     const kpis = useMemo(() => {
         let emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0;
-        filteredData.forEach(r => { emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; });
+        const processedContracts = new Set();
+        let qtdAtivos = 0, qtdAtivosInexec = 0, qtdAtivosEmExec = 0, qtdAtivosExecTot = 0, qtdAtivosExecParc = 0;
+        let qtdVencidos = 0, qtdVencInexecTot = 0, qtdVencidosTot = 0, qtdVencidosParc = 0;
+        let qtdBloqueados = 0, qtdCancelados = 0;
+
+        filteredData.forEach(r => { 
+            emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; 
+            if (!processedContracts.has(r.contrato)) {
+                processedContracts.add(r.contrato);
+                if (r.situacaoFlags.some(f => f.label === 'CAN')) qtdCancelados++;
+                if (r.situacaoFlags.some(f => f.label === 'BLOQ')) qtdBloqueados++;
+                
+                if (r.situacaoFlags.some(f => f.label.startsWith('ATIVO'))) {
+                    qtdAtivos++;
+                    if (r.situacaoFlags.some(f => f.label === 'ATIVO INEXEC')) qtdAtivosInexec++;
+                    else if (r.situacaoFlags.some(f => f.label === 'ATIVO EM EXEC')) qtdAtivosEmExec++;
+                    else if (r.situacaoFlags.some(f => f.label === 'ATIVO EXEC TOT')) qtdAtivosExecTot++;
+                    else if (r.situacaoFlags.some(f => f.label === 'ATIVO EXEC PARC')) qtdAtivosExecParc++;
+                } else if (r.situacaoFlags.some(f => f.label.startsWith('VENC'))) {
+                    qtdVencidos++;
+                    if (r.situacaoFlags.some(f => f.label === 'VENC INEXEC TOT')) qtdVencInexecTot++;
+                    else if (r.situacaoFlags.some(f => f.label === 'VENC EXEC TOT')) qtdVencidosTot++;
+                    else if (r.situacaoFlags.some(f => f.label === 'VENC EXEC PARC')) qtdVencidosParc++;
+                }
+            }
+        });
+
         return {
-            qtdContratos: new Set(filteredData.map(d => d.contrato)).size,
+            qtdContratos: processedContracts.size,
             qtdGestores: new Set(filteredData.map(d => d.gestor)).size,
             qtdFiscais: new Set(filteredData.map(d => d.fiscal)).size,
             qtdFornecedores: new Set(filteredData.map(d => d.fornecedor)).size,
+            qtdAtivos, qtdAtivosInexec, qtdAtivosEmExec, qtdAtivosExecTot, qtdAtivosExecParc,
+            qtdVencidos, qtdVencInexecTot, qtdVencidosTot, qtdVencidosParc, qtdBloqueados, qtdCancelados,
             emp, liq, pag, blo, can, exe,
             pLiq: emp ? liq / emp : 0, pPag: emp ? pag / emp : 0, pBlo: emp ? blo / emp : 0, pCan: emp ? can / emp : 0, pExe: emp ? exe / emp : 0
         };
     }, [filteredData]);
 
-    // Motor para gerar dados das Pizzas com a categoria "OUTROS"
     const getPieData = (key, metric = 'total') => {
         const map = {};
         filteredData.forEach(item => {
@@ -801,9 +903,10 @@ function Dashboard() {
     const fornecedorChartData = useMemo(() => {
         const map = {};
         filteredData.forEach(item => {
-            if (!map[item.fornecedor]) map[item.fornecedor] = { label: item.fornecedor, count: 0, total: 0, objetos: new Set(), modalidades: new Set() };
+            if (!map[item.fornecedor]) map[item.fornecedor] = { label: item.fornecedor, count: 0, total: 0, pago: 0, objetos: new Set(), modalidades: new Set() };
             map[item.fornecedor].count += 1; 
             map[item.fornecedor].total += item.v_empenhado;
+            map[item.fornecedor].pago += item.v_pago;
             if(item.objeto && item.objeto !== "-") map[item.fornecedor].objetos.add(item.objeto);
             if(item.modalidade && item.modalidade !== "-") map[item.fornecedor].modalidades.add(item.modalidade);
         });
@@ -905,7 +1008,6 @@ function Dashboard() {
                         <button onClick={clearAllFilters} className="text-[10px] font-bold uppercase bg-slate-800 text-white px-4 py-2 rounded hover:bg-slate-700 transition shadow-md">Limpar Filtros</button>
                     </div>
                 </div>
-                {/* INCLUSÃO DA NOVA COLUNA NO GRID AQUI */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
                     <MultiSelect label="FISCAL" options={[...new Set(rawData.map(r => r.fiscal))].sort()} selected={fFiscal} onChange={setFFiscal} />
                     <MultiSelect label="GESTOR" options={[...new Set(rawData.map(r => r.gestor))].sort()} selected={fGestor} onChange={setFGestor} />
@@ -922,20 +1024,24 @@ function Dashboard() {
                 </div>
             </div>
 
-            {/* DUAS LINHAS DE KPIS */}
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-4 gap-6 mb-4">
+            <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 mb-4">
                 <KPICard title="Contratos" value={kpis.qtdContratos} color="slate" isCurrency={false} />
+                <KPICard title="Ativos" value={kpis.qtdAtivos} extraText={`Inexec: ${kpis.qtdAtivosInexec}\nEm Exec: ${kpis.qtdAtivosEmExec}\nExec Tot: ${kpis.qtdAtivosExecTot}\nExec Parc: ${kpis.qtdAtivosExecParc}`} color="blue" isCurrency={false} />
+                <KPICard title="Vencidos" value={kpis.qtdVencidos} extraText={`Inexec Tot: ${kpis.qtdVencInexecTot}\nExec Tot: ${kpis.qtdVencidosTot}\nExec Parc: ${kpis.qtdVencidosParc}`} color="slate" isCurrency={false} />
+                <KPICard title="Bloqueados" value={kpis.qtdBloqueados} color="orange" isCurrency={false} />
+                <KPICard title="Cancelados" value={kpis.qtdCancelados} color="red" isCurrency={false} />
                 <KPICard title="Gestores" value={kpis.qtdGestores} color="amber" isCurrency={false} />
                 <KPICard title="Fiscais" value={kpis.qtdFiscais} color="emerald" isCurrency={false} />
                 <KPICard title="Fornecedores" value={kpis.qtdFornecedores} color="violet" isCurrency={false} />
             </div>
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
                 <KPICard title="Empenhado" value={kpis.emp} color="blue" isCurrency={true} />
                 <KPICard title="Liquidado" value={kpis.liq} subValue={kpis.pLiq} diffLabel="Dif (Emp-Liq)" diffValue={kpis.emp - kpis.liq} color="amber" isCurrency={true} />
                 <KPICard title="Pago" value={kpis.pag} subValue={kpis.pPag} diffLabel="Dif (Liq-Pag)" diffValue={kpis.liq - kpis.pag} color="emerald" isCurrency={true} />
                 <KPICard title="Bloqueado" value={kpis.blo} subValue={kpis.pBlo} color="orange" isCurrency={true} />
                 <KPICard title="Cancelado" value={kpis.can} subValue={kpis.pCan} color="red" isCurrency={true} />
                 <KPICard title="Executado" value={kpis.exe} subValue={kpis.pExe} color="blue" isCurrency={true} />
+                <KPICard title="Executado Líquido" value={kpis.pag} subValue={kpis.pPag} color="violet" isCurrency={true} />
             </div>
 
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
@@ -969,7 +1075,6 @@ function Dashboard() {
                 </div>
             </div>
 
-            {/* GRÁFICOS DE PIZZA (LINHA 1) */}
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
                     <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (Mod)</h3>
@@ -989,7 +1094,6 @@ function Dashboard() {
                 </div>
             </div>
 
-            {/* GRÁFICOS DE PIZZA (LINHA 2) */}
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
                     <h3 className="text-[10px] font-black text-slate-800 mb-4 uppercase text-center">Empenhado (Nr Compra)</h3>
@@ -1028,6 +1132,10 @@ function Dashboard() {
                                 { 
                                     label: 'Valor Empenhado', data: fornecedorChartData.map(d => d.total), backgroundColor: '#3b82f6', yAxisID: 'y', borderRadius: 4,
                                     datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
+                                },
+                                { 
+                                    label: 'Executado Líquido', data: fornecedorChartData.map(d => d.pago), backgroundColor: '#8b5cf6', yAxisID: 'y', borderRadius: 4, type: 'bar',
+                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) }
                                 }
                             ]
                         }} options={{ 
@@ -1038,7 +1146,6 @@ function Dashboard() {
                 </div>
             </div>
             
-            {/* GRÁFICO EVOLUÇÃO POR ANO - VERTICAL/COLUNAS */}
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <h3 className="text-xs font-black text-slate-800 uppercase mb-6">Evolução por Ano (Iniciados, Encerrados e Empenhado)</h3>
@@ -1090,18 +1197,24 @@ function Dashboard() {
                             labels: contratoChartData.map(d => formatLabelMultiLine(d.contrato)),
                             datasets: [
                                 {
-                                    label: '% Tempo', data: contratoChartData.map(d => d.perc_tempo), borderColor: '#8b5cf6', backgroundColor: '#8b5cf6', yAxisID: 'y_perc', type: 'line', borderWidth: 2, tension: 0.3, pointRadius: 4,
-                                    datalabels: { display: true, color: '#6d28d9', anchor: 'end', align: 'top', font: { size: 9, weight: 'bold' }, formatter: v => formatPercentBR(v) }
+                                    label: '% Tempo', data: contratoChartData.map(d => d.perc_tempo), borderColor: '#ec4899', backgroundColor: '#ec4899', yAxisID: 'y_perc', type: 'line', borderWidth: 2, tension: 0.3, pointRadius: 4,
+                                    datalabels: { display: true, color: '#be185d', anchor: 'end', align: 'top', font: { size: 9, weight: 'bold' }, formatter: v => formatPercentBR(v) }
                                 },
                                 { 
                                     label: '% Execução', data: contratoChartData.map(d => d.p_executado), 
-                                    backgroundColor: contratoChartData.map(d => getSemanticColor(d.p_executado)), 
+                                    backgroundColor: '#22c55e', 
                                     yAxisID: 'y_perc', borderRadius: 4, type: 'bar',
                                     datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => formatPercentBR(v) }
                                 },
                                 { 
                                     label: '% Liquidado', data: contratoChartData.map(d => d.p_liquidado), 
-                                    backgroundColor: contratoChartData.map(d => getHatchPattern(getSemanticColor(d.p_liquidado))), 
+                                    backgroundColor: '#f59e0b', 
+                                    yAxisID: 'y_perc', borderRadius: 4, type: 'bar',
+                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => formatPercentBR(v) }
+                                },
+                                { 
+                                    label: '% Exec. Líquida', data: contratoChartData.map(d => d.p_pago), 
+                                    backgroundColor: '#8b5cf6', 
                                     yAxisID: 'y_perc', borderRadius: 4, type: 'bar',
                                     datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'end', align: 'start', rotation: 90, font: { size: 9, weight: 'bold' }, formatter: v => formatPercentBR(v) }
                                 },
@@ -1122,7 +1235,6 @@ function Dashboard() {
                 </div>
             </div>
 
-            {/* SCATTER PLOT - CORRELAÇÃO */}
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <div className="flex justify-between items-center mb-6">
@@ -1153,7 +1265,6 @@ function Dashboard() {
                 </div>
             </div>
 
-            {/* TABELA DE DADOS MASTER */}
             <div className="max-w-[1600px] mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden mb-10">
                 <div className="bg-slate-800 px-4 py-3 flex justify-between items-center flex-wrap gap-2">
                     <h3 className="text-white text-xs font-black tracking-widest uppercase">
@@ -1166,13 +1277,14 @@ function Dashboard() {
                     </div>
                 </div>
                 <div className="overflow-x-auto h-[600px]">
-                    <table className="w-full text-left text-[10px] border-collapse relative" style={{ tableLayout: 'fixed', minWidth: '1900px' }}>
+                    <table className="w-full text-left text-[10px] border-collapse relative" style={{ tableLayout: 'fixed', minWidth: '2400px' }}>
                         <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 shadow-sm z-10">
                             <tr className="text-slate-600 uppercase font-black tracking-tighter align-top">
                                 <TextHeader widthClass="w-[7%]" label="Contrato" field="contrato" current={sortConfig} onSort={handleSort} searchVal={searchContrato} onSearchChange={setSearchContrato} />
-                                <TextHeader widthClass="w-[12%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />
-                                <TextHeader widthClass="w-[12%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />
-                                <TextHeader widthClass="w-[8%]" label="Gestor/Fiscal" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />
+                                <TextHeader widthClass="w-[6%]" label="Situação" field="situacao" current={sortConfig} onSort={handleSort} searchVal={searchSituacao} onSearchChange={setSearchSituacao} />
+                                <TextHeader widthClass="w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />
+                                <TextHeader widthClass="w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />
+                                <TextHeader widthClass="w-[7%]" label="Gestor/Fiscal" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />
                                 <DateFilterHeader widthClass="w-[5%]" label="Início" field="data_inic" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />
                                 <DateFilterHeader widthClass="w-[5%]" label="Fim" field="data_fim" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />
                                 <NumericHeader widthClass="w-[6%]" label="% Tempo" field="perc_tempo" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
@@ -1190,6 +1302,8 @@ function Dashboard() {
                                 <NumericHeader widthClass="w-[4%]" label="Canc %" field="p_cancelado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
                                 <NumericHeader widthClass="w-[6%]" label="Executado" field="v_executado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
                                 <NumericHeader widthClass="w-[4%]" label="Exec %" field="p_executado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
+                                <NumericHeader widthClass="w-[6%]" label="EXEC LIQ" field="v_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
+                                <NumericHeader widthClass="w-[4%]" label="EXEC LIQ %" field="p_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -1199,6 +1313,13 @@ function Dashboard() {
                                         {row.contrato}
                                         <div className="text-[8px] font-normal text-slate-500 mt-1 leading-tight">Compra: {row.compra}<br/>Mod: {row.modalidade}</div>
                                     </td>
+                                    <td className="p-3 align-top">
+                                        <div className="flex flex-wrap gap-1">
+                                            {row.situacaoFlags.map((f, idx) => (
+                                                <span key={idx} className={`text-[8px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${f.color}`}>{f.label}</span>
+                                            ))}
+                                        </div>
+                                    </td>
                                     <td className="p-3 text-slate-600 font-bold break-words">{row.fornecedor}</td>
                                     <td className="p-3 text-slate-500 break-words">{row.objeto}</td>
                                     <td className="p-3 break-words"><div className="font-bold text-slate-700">{row.gestor}</div><div className="text-[9px] text-slate-400">{row.fiscal}</div></td>
@@ -1207,7 +1328,10 @@ function Dashboard() {
                                     <td className="p-3 align-middle">{row.perc_tempo !== null ? (<div className="flex items-center gap-1"><div className="w-full bg-slate-200 rounded-full h-1.5 flex-1 overflow-hidden"><div className={`h-1.5 rounded-full ${row.perc_tempo >= 1 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(Math.max(row.perc_tempo * 100, 0), 100)}%` }}></div></div><span className="text-[8px] font-bold text-slate-600 min-w-[30px] text-right">{formatPercentBR(row.perc_tempo)}</span></div>) : "-"}</td>
                                     <td className="p-3 text-center font-bold text-slate-600">{row.dias_passaram !== null ? `${row.dias_passaram} d` : "-"}</td>
                                     <td className={`p-3 text-center font-bold ${row.encerrando_dias < 0 ? 'text-red-500' : 'text-emerald-600'}`}>{row.encerrando_dias !== null ? `${row.encerrando_dias} d` : "-"}</td>
-                                    <td className="p-3 text-right font-bold text-slate-700 bg-slate-50/30">{formatBRL(row.v_global)}</td>
+                                    <td className="p-3 text-right font-bold text-slate-700 bg-slate-50/30">
+                                        {formatBRL(row.v_global)}
+                                        <div className="text-[8px] font-normal text-slate-500 mt-1 leading-tight" title="Dif. (Global - Empenhado Total do Contrato)">Dif: {formatBRL(row.v_global - row.contrato_empenhado_total)}</div>
+                                    </td>
                                     <td className="p-3 text-right font-bold text-blue-700">{formatBRL(row.v_empenhado)}</td>
                                     <td className="p-3 text-right font-bold text-amber-600">{formatBRL(row.v_liquidado)}</td>
                                     <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_liquidado)}</td>
@@ -1219,6 +1343,8 @@ function Dashboard() {
                                     <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_cancelado)}</td>
                                     <td className="p-3 text-right font-black text-blue-600">{formatBRL(row.v_executado)}</td>
                                     <td className="p-3 text-center font-black text-blue-800 bg-slate-50/50">{formatPercentBR(row.p_executado)}</td>
+                                    <td className="p-3 text-right font-black text-violet-600">{formatBRL(row.v_pago)}</td>
+                                    <td className="p-3 text-center font-black text-violet-800 bg-violet-50/30">{formatPercentBR(row.p_pago)}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -1234,7 +1360,9 @@ function Dashboard() {
                                 <td className="p-3 text-center">-</td>
                                 <td className="p-3 text-right text-red-800">{formatBRL(totalsMaster.can)}</td>
                                 <td className="p-3 text-center">-</td>
-                                <td className="p-3 text-right">-</td>
+                                <td className="p-3 text-right text-blue-800">{formatBRL(totalsMaster.exe)}</td>
+                                <td className="p-3 text-center">-</td>
+                                <td className="p-3 text-right text-violet-800">{formatBRL(totalsMaster.pag)}</td>
                                 <td className="p-3 text-center">-</td>
                             </tr>
                         </tfoot>
@@ -1276,7 +1404,7 @@ function App() {
             '01100111 01100101 01110011 01110100 01101111 01110010': '00110000 00110001 00110000 00110001', 
             '01100110 01101001 01110011 01100011 01100001 01101100': '00110000 00110010 00110000 00110010', 
             '01100001 01101100 01101101 01100101 01110010 01101001 01100001': '00110010 00110000 00110000 00110010', 
-            '01100010 01101111 01110101 01101100 01100101 01110110 01100001 01110010 01100100': '00110000 00110001 00110011 00110110' 
+            '01100010 01101111 01110101 01101100 01100101 01110111 01100001 01110010 01100100': '00110000 00110001 00110011 00110110' 
         };
         const users = {};
         Object.keys(usersBinary).forEach(binUser => { users[decodeBinary(binUser)] = decodeBinary(usersBinary[binUser]); });
