@@ -1183,6 +1183,17 @@ function Dashboard() {
         return sorted;
     };
 
+    const getChartData = (keyName) => {
+        const map = {};
+        filteredData.forEach(item => {
+            const k = item[keyName];
+            if (!map[k]) map[k] = { label: k, count: 0, total: 0 };
+            map[k].count += 1;
+            map[k].total += item.v_empenhado;
+        });
+        return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 10);
+    };
+
     const modDataV = getPieData('modalidade', 'total');
     const modDataQ = getPieData('modalidade', 'count');
     const secDataV = getPieData('sec_log', 'total');
@@ -1312,6 +1323,18 @@ function Dashboard() {
             };
         });
     }, [filteredData, scatterXAxis, scatterHiddenTags]);
+
+    // Resumo de Contadores por Quadrante do Bubble Chart
+    const q1Normal = bubbleData.filter(d => d.x <= 50 && d.y <= 50).length;
+    const q2Ruim = bubbleData.filter(d => d.x <= 50 && d.y > 50).length;
+    const q3Normal = bubbleData.filter(d => d.x > 50 && d.y > 50).length;
+    const q4Otimo = bubbleData.filter(d => d.x > 50 && d.y <= 50).length;
+    const totalBubbles = bubbleData.length;
+    const pQ1 = totalBubbles ? ((q1Normal / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
+    const pQ2 = totalBubbles ? ((q2Ruim / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
+    const pQ3 = totalBubbles ? ((q3Normal / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
+    const pQ4 = totalBubbles ? ((q4Otimo / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
+
 
     if (loading) return (
         <div className="h-screen flex flex-col items-center justify-center font-black text-slate-400 gap-4">
@@ -1696,11 +1719,19 @@ function Dashboard() {
 
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-xs font-black text-slate-800 uppercase">
-                            Correlação: {scatterXAxis === 'p_executado' ? '% Executado' : scatterXAxis === 'p_liquidado' ? '% Liquidado' : '% Pago'} vs % Tempo (Tamanho da bolha: Empenhado)
-                        </h3>
-                        <select value={scatterXAxis} onChange={(e) => setScatterXAxis(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-3 py-1.5 outline-none">
+                    <div className="flex justify-between items-start mb-6">
+                        <div className="flex flex-col gap-2">
+                            <h3 className="text-xs font-black text-slate-800 uppercase">
+                                Correlação: {scatterXAxis === 'p_executado' ? '% Executado' : scatterXAxis === 'p_liquidado' ? '% Liquidado' : '% Pago'} vs % Tempo (Tamanho da bolha: Empenhado)
+                            </h3>
+                            <div className="flex flex-wrap gap-2">
+                                <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-[9px] font-bold border border-slate-200">NORMAL (Q1): {q1Normal} ({pQ1})</span>
+                                <span className="bg-red-50 text-red-600 px-2 py-1 rounded text-[9px] font-bold border border-red-200">RUIM (Q2): {q2Ruim} ({pQ2})</span>
+                                <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-[9px] font-bold border border-slate-200">NORMAL (Q3): {q3Normal} ({pQ3})</span>
+                                <span className="bg-green-50 text-green-600 px-2 py-1 rounded text-[9px] font-bold border border-green-200">ÓTIMO (Q4): {q4Otimo} ({pQ4})</span>
+                            </div>
+                        </div>
+                        <select value={scatterXAxis} onChange={(e) => setScatterXAxis(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-3 py-1.5 outline-none mt-1 shrink-0">
                             <option value="p_executado">% Executado</option>
                             <option value="p_liquidado">% Liquidado</option>
                             <option value="p_pago">% Pago</option>
