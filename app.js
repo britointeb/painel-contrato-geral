@@ -329,13 +329,15 @@ const exportMasterColumns = [
     { header: "FIM", key: "data_fim" }, { header: "% TEMPO", key: "perc_tempo", isPercent: true }, 
     { header: "PASSARAM", key: "dias_passaram" }, { header: "FALTAM", key: "encerrando_dias" },
     { header: "GLOBAL-EMP", key: "dif_global", isCurrency: true }, { header: "GLOBAL", key: "v_global", isCurrency: true }, 
-    { header: "EMPENHADO", key: "v_empenhado", isCurrency: true }, { header: "LIQUIDADO", key: "v_liquidado", isCurrency: true }, 
-    { header: "LIQ %", key: "p_liquidado", isPercent: true }, { header: "PAGO", key: "v_pago", isCurrency: true }, 
-    { header: "PAGO %", key: "p_pago", isPercent: true }, { header: "BLOQUEADO", key: "v_bloqueado", isCurrency: true }, 
-    { header: "BLOQ %", key: "p_bloqueado", isPercent: true }, { header: "CANCELADO", key: "v_cancelado", isCurrency: true }, 
-    { header: "CANC %", key: "p_cancelado", isPercent: true }, { header: "EXECUTADO", key: "v_executado", isCurrency: true }, 
-    { header: "EXEC %", key: "p_executado", isPercent: true }, { header: "EXEC LIQ", key: "v_pago", isCurrency: true }, 
-    { header: "EXEC LIQ %", key: "p_pago", isPercent: true }
+    { header: "EMPENHADO", key: "v_empenhado", isCurrency: true }, 
+    { header: "LIQUIDADO", key: "v_liquidado", isCurrency: true }, { header: "LIQ %", key: "p_liquidado", isPercent: true }, 
+    { header: "A LIQUIDAR", key: "v_a_liquidar", isCurrency: true }, { header: "A LIQ %", key: "p_a_liquidar", isPercent: true }, 
+    { header: "PAGO", key: "v_pago", isCurrency: true }, { header: "PAGO %", key: "p_pago", isPercent: true }, 
+    { header: "A PAGAR", key: "v_a_pagar", isCurrency: true }, { header: "A PAGAR %", key: "p_a_pagar", isPercent: true }, 
+    { header: "BLOQUEADO", key: "v_bloqueado", isCurrency: true }, { header: "BLOQ %", key: "p_bloqueado", isPercent: true }, 
+    { header: "CANCELADO", key: "v_cancelado", isCurrency: true }, { header: "CANC %", key: "p_cancelado", isPercent: true }, 
+    { header: "EXECUTADO", key: "v_executado", isCurrency: true }, { header: "EXEC %", key: "p_executado", isPercent: true }, 
+    { header: "EXEC LIQ", key: "v_pago", isCurrency: true }, { header: "EXEC LIQ %", key: "p_pago", isPercent: true }
 ];
 
 const tooltipCallback = {
@@ -484,9 +486,12 @@ const ChartComponent = ({ type, data, options, id }) => {
     return <canvas ref={canvasRef}></canvas>;
 };
 
-// Componente: Alterna entre Gráfico de Pizza e Barra Vertical Única
-function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
+// Componente: Alterna entre Gráfico de Pizza e Barra Vertical Única com Seletor Financeiro
+function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
     const [viewPie, setViewPie] = useState(true);
+    const [finMetric, setFinMetric] = useState('total');
+
+    const activeMetric = isFinancial ? finMetric : 'count';
 
     const cleanData = useMemo(() => {
         let processed = [...data];
@@ -496,18 +501,46 @@ function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
                 label: d.label.replace(/^[\d\.\-\/]+\s*-\s*/, '')
             }));
         }
-        processed.sort((a, b) => b[pieMetric] - a[pieMetric]);
+        
+        // Sorting by chosen dynamic metric
+        processed.sort((a, b) => b[activeMetric] - a[activeMetric]);
+
+        // Re-group into "OUTROS" dynamic slice
+        if (processed.length > 10) {
+            const top9 = processed.slice(0, 9);
+            const others = processed.slice(9).reduce((acc, curr) => {
+                acc.count += curr.count || 0;
+                acc.total += curr.total || 0;
+                acc.liquidado += curr.liquidado || 0;
+                acc.a_liquidar += curr.a_liquidar || 0;
+                acc.pago += curr.pago || 0;
+                acc.a_pagar += curr.a_pagar || 0;
+                acc.bloqueado += curr.bloqueado || 0;
+                acc.cancelado += curr.cancelado || 0;
+                acc.executado += curr.executado || 0;
+                return acc;
+            }, { label: "OUTROS", count: 0, total: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0 });
+            processed = [...top9, others];
+        }
         return processed;
-    }, [data, isFornecedor, pieMetric]);
+    }, [data, isFornecedor, activeMetric]);
 
     const chartLabels = cleanData.map(d => formatLabelMultiLine(d.label, 15));
-    const isTotal = pieMetric === 'total';
+    
+    const metricNames = {
+        'total': 'Empenhado', 'liquidado': 'Liquidado', 'a_liquidar': 'A Liquidar', 
+        'pago': 'Pago (Exec Líq)', 'a_pagar': 'A Pagar',
+        'bloqueado': 'Bloqueado', 'cancelado': 'Cancelado', 'executado': 'Executado',
+        'count': 'QTD Contratos'
+    };
+    const currentMetricName = metricNames[activeMetric];
+    const displayTitle = isFinancial ? title.replace(/Empenhado/i, currentMetricName.split(' ')[0] + (currentMetricName.includes('Liq') ? ' Liq' : '') + (currentMetricName.includes('Pag') ? ' Pag' : '')) : title;
 
     const pieData = {
         labels: cleanData.map(d => d.label),
         datasets: [{
-            label: isTotal ? 'Valor Empenhado' : 'QTD Contratos',
-            data: cleanData.map(d => d[pieMetric]),
+            label: isFinancial ? currentMetricName : 'QTD Contratos',
+            data: cleanData.map(d => d[activeMetric]),
             backgroundColor: cleanData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : pieColors[i % pieColors.length]),
             borderWidth: 1,
             borderColor: '#ffffff'
@@ -528,7 +561,7 @@ function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
                         const dataArr = context.chart.data.datasets[0].data;
                         const total = dataArr.reduce((a, b) => a + b, 0);
                         const percentage = total ? (value * 100 / total).toFixed(2).replace('.', ',') + '%' : '0%';
-                        if (isTotal) {
+                        if (isFinancial) {
                             label += formatBRL(value) + ' (' + percentage + ')';
                         } else {
                             label += value.toLocaleString('pt-BR') + ' (' + percentage + ')';
@@ -584,7 +617,7 @@ function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
                     const total = dataArr.reduce((a, b) => a + b, 0);
                     if (!total || value === 0) return '';
                     const percentage = (value * 100 / total);
-                    const valStr = isTotal ? shortenNumber(value) : value.toLocaleString('pt-BR');
+                    const valStr = isFinancial ? shortenNumber(value) : value.toLocaleString('pt-BR');
                     return `${percentage.toFixed(1).replace('.', ',')}%\n${valStr}`;
                 }
             }
@@ -594,9 +627,9 @@ function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
     const barData = {
         labels: chartLabels,
         datasets: [{
-            label: isTotal ? 'Valor Empenhado' : 'Quantidade',
-            data: cleanData.map(d => d[pieMetric]),
-            backgroundColor: cleanData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : (isTotal ? '#3b82f6' : '#f97316')),
+            label: isFinancial ? currentMetricName : 'Quantidade',
+            data: cleanData.map(d => d[activeMetric]),
+            backgroundColor: cleanData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : (isFinancial ? '#3b82f6' : '#f97316')),
             borderRadius: 4
         }]
     };
@@ -617,7 +650,7 @@ function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
                 rotation: -90,
                 offset: 4,
                 font: { size: 9, weight: 'bold' },
-                formatter: (v) => isTotal ? shortenNumber(v) : v.toLocaleString('pt-BR')
+                formatter: (v) => isFinancial ? shortenNumber(v) : v.toLocaleString('pt-BR')
             }
         },
         scales: {
@@ -639,8 +672,8 @@ function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
                 grace: '10%',
                 position: 'left',
                 grid: { display: true },
-                ticks: { callback: v => isTotal ? shortenNumber(v) : v },
-                title: { display: true, text: isTotal ? 'Valor Empenhado (R$)' : 'Quantidade', font: { size: 9, weight: 'bold' } }
+                ticks: { callback: v => isFinancial ? shortenNumber(v) : v },
+                title: { display: true, text: isFinancial ? `Valor ${currentMetricName} (R$)` : 'Quantidade', font: { size: 9, weight: 'bold' } }
             }
         }
     };
@@ -648,10 +681,22 @@ function ToggleableChartCard({ title, data, pieMetric, id, isFornecedor }) {
     return (
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full hover:shadow-md transition">
             <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
-                <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-tight flex-1 pr-2">{title}</h3>
+                <h3 className="text-[10px] font-black text-slate-800 uppercase tracking-tight flex-1 pr-2">{displayTitle}</h3>
                 <div className="flex gap-2 items-center shrink-0">
-                    <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded">
-                        {viewPie ? 'Fatias' : 'Barras'}: {data.length}
+                    {isFinancial && (
+                        <select value={finMetric} onChange={(e) => setFinMetric(e.target.value)} className="text-[9px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
+                            <option value="total">Empenhado</option>
+                            <option value="liquidado">Liquidado</option>
+                            <option value="a_liquidar">A Liquidar</option>
+                            <option value="pago">Pago / Exec Líq</option>
+                            <option value="a_pagar">A Pagar</option>
+                            <option value="cancelado">Cancelado</option>
+                            <option value="bloqueado">Bloqueado</option>
+                            <option value="executado">Executado</option>
+                        </select>
+                    )}
+                    <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded hidden sm:inline-block">
+                        {viewPie ? 'Fatias' : 'Barras'}: {cleanData.length}
                     </span>
                     <button onClick={() => setViewPie(!viewPie)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer">
                         {viewPie ? '► BARRAS' : '► PIZZA'}
@@ -863,9 +908,14 @@ function Dashboard() {
 
     const initialNumFilters = {
         perc_tempo: {min:'', max:''}, dias_passaram: {min:'', max:''}, encerrando_dias: {min:'', max:''}, 
-        dif_global: {min:'', max:''}, v_global: {min:'', max:''}, v_empenhado: {min:'', max:''}, v_liquidado: {min:'', max:''}, p_liquidado: {min:'', max:''}, 
-        v_pago: {min:'', max:''}, p_pago: {min:'', max:''}, v_bloqueado: {min:'', max:''}, p_bloqueado: {min:'', max:''},
-        v_cancelado: {min:'', max:''}, p_cancelado: {min:'', max:''}, v_executado: {min:'', max:''}, p_executado: {min:'', max:''}
+        dif_global: {min:'', max:''}, v_global: {min:'', max:''}, v_empenhado: {min:'', max:''}, 
+        v_liquidado: {min:'', max:''}, p_liquidado: {min:'', max:''}, 
+        v_a_liquidar: {min:'', max:''}, p_a_liquidar: {min:'', max:''}, 
+        v_pago: {min:'', max:''}, p_pago: {min:'', max:''}, 
+        v_a_pagar: {min:'', max:''}, p_a_pagar: {min:'', max:''}, 
+        v_bloqueado: {min:'', max:''}, p_bloqueado: {min:'', max:''},
+        v_cancelado: {min:'', max:''}, p_cancelado: {min:'', max:''}, 
+        v_executado: {min:'', max:''}, p_executado: {min:'', max:''}
     };
     const [numFilters, setNumFilters] = useState(initialNumFilters);
     const initialDateFilters = { data_inic: {min:'', max:''}, data_fim: {min:'', max:''} };
@@ -939,6 +989,17 @@ function Dashboard() {
                 percTempo = totalDias > 0 ? diasPassaram / totalDias : 0;
             }
 
+            const v_empenhado = parseValue(getVal(["TOTAL EMPENHADO"]));
+            const v_liquidado = parseValue(getVal(["TOTAL LIQUIDADO"]));
+            const v_pago = parseValue(getVal(["TOTAL PAGO"]));
+            const v_cancelado = parseValue(getVal(["TOTAL CANCELADO"]));
+            const v_bloqueado = parseValue(getVal(["TOTAL BLOQUEADO"]));
+
+            const v_a_liquidar = v_empenhado - v_liquidado - v_cancelado - v_bloqueado;
+            const v_a_pagar = v_empenhado - v_pago - v_cancelado - v_bloqueado;
+            const p_a_liquidar = v_empenhado ? v_a_liquidar / v_empenhado : 0;
+            const p_a_pagar = v_empenhado ? v_a_pagar / v_empenhado : 0;
+
             return {
                 contrato: (getVal(["Número Contrato", "numero_contrato"]) || "-").toUpperCase(),
                 fornecedor: (getVal(["Fornecedor"]) || "-").toUpperCase(),
@@ -956,20 +1017,25 @@ function Dashboard() {
                 ano_vig_ini: dtInicParsed ? dtInicParsed.getFullYear().toString() : "N/I",
                 dias_passaram: diasPassaram, perc_tempo: percTempo, encerrando_dias: diasRestantes,
                 
-                v_global: parseValue(getVal(["Valor Global"])), v_empenhado: parseValue(getVal(["TOTAL EMPENHADO"])),
+                v_global: parseValue(getVal(["Valor Global"])), 
+                v_empenhado, v_liquidado, v_pago, v_bloqueado, v_cancelado,
                 v_recebido: parseValue(getVal(["TOTAL RECEBIDO", "VALOR RECEBIDO", "RECEBIDO"], ["recebido"])),
-                v_liquidado: parseValue(getVal(["TOTAL LIQUIDADO"])), v_pago: parseValue(getVal(["TOTAL PAGO"])),
-                v_bloqueado: parseValue(getVal(["TOTAL BLOQUEADO"])), v_cancelado: parseValue(getVal(["TOTAL CANCELADO"])),
-                v_executado: parseValue(getVal(["TOTAL EXECUTADO"])), p_liquidado: parsePercentAsFloat(getVal(["TOTAL LIQUIDADO %"])),
-                p_pago: parsePercentAsFloat(getVal(["TOTAL PAGO %"])), p_bloqueado: parsePercentAsFloat(getVal(["TOTAL BLOQUEADO %"])),
-                p_cancelado: parsePercentAsFloat(getVal(["TOTAL CANCELADO %"])), p_executado: parsePercentAsFloat(getVal(["TOTAL EXECUTADO %"]))
+                v_executado: parseValue(getVal(["TOTAL EXECUTADO"])), 
+                
+                v_a_liquidar, p_a_liquidar, v_a_pagar, p_a_pagar,
+
+                p_liquidado: parsePercentAsFloat(getVal(["TOTAL LIQUIDADO %"])),
+                p_pago: parsePercentAsFloat(getVal(["TOTAL PAGO %"])), 
+                p_bloqueado: parsePercentAsFloat(getVal(["TOTAL BLOQUEADO %"])),
+                p_cancelado: parsePercentAsFloat(getVal(["TOTAL CANCELADO %"])), 
+                p_executado: parsePercentAsFloat(getVal(["TOTAL EXECUTADO %"]))
             };
         }).filter(r => r.contrato !== "-" && r.fornecedor !== "-");
 
         // Agregação para definição das Situações Globais Exatas
         const cTotals = {};
         mappedRaw.forEach(r => {
-            if (!cTotals[r.contrato]) cTotals[r.contrato] = { v_empenhado: 0, v_recebido: 0, v_liquidado: 0, v_pago: 0, v_executado: 0, v_bloqueado: 0, v_cancelado: 0, encerrando_dias: r.encerrando_dias };
+            if (!cTotals[r.contrato]) cTotals[r.contrato] = { v_empenhado: 0, v_recebido: 0, v_liquidado: 0, v_pago: 0, v_executado: 0, v_bloqueado: 0, v_cancelado: 0, v_a_liquidar: 0, v_a_pagar: 0, encerrando_dias: r.encerrando_dias };
             cTotals[r.contrato].v_empenhado += r.v_empenhado || 0;
             cTotals[r.contrato].v_recebido += r.v_recebido || 0;
             cTotals[r.contrato].v_liquidado += r.v_liquidado || 0;
@@ -977,6 +1043,8 @@ function Dashboard() {
             cTotals[r.contrato].v_executado += r.v_executado || 0;
             cTotals[r.contrato].v_bloqueado += r.v_bloqueado || 0;
             cTotals[r.contrato].v_cancelado += r.v_cancelado || 0;
+            cTotals[r.contrato].v_a_liquidar += r.v_a_liquidar || 0;
+            cTotals[r.contrato].v_a_pagar += r.v_a_pagar || 0;
             if (r.encerrando_dias !== null) {
                 cTotals[r.contrato].encerrando_dias = r.encerrando_dias;
             }
@@ -1114,9 +1182,13 @@ function Dashboard() {
     }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
 
     const totalsMaster = useMemo(() => {
-        let emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0;
-        filteredData.forEach(r => { emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; });
-        return { emp, liq, pag, blo, can, exe };
+        let emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
+        filteredData.forEach(r => { 
+            emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; 
+            blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; 
+            a_liq += r.v_a_liquidar; a_pag += r.v_a_pagar; 
+        });
+        return { emp, liq, pag, blo, can, exe, a_liq, a_pag };
     }, [filteredData]);
 
     const kpis = useMemo(() => {
@@ -1186,61 +1258,39 @@ function Dashboard() {
     const gestorDataProcessed = getPersonData('gestor');
     const fiscalDataProcessed = getPersonData('fiscal');
 
-    const getPieData = (key, metric = 'total', filterCustom = null) => {
+    const getPieDataFull = (key, filterCustom = null) => {
         const map = {};
         const dataToProcess = filterCustom ? filteredData.filter(filterCustom) : filteredData;
-        
         dataToProcess.forEach(item => {
             let val = item[key] && item[key] !== "-" ? item[key] : "N/I";
             if (key === 'situacao') {
                 const mainTag = item.situacaoFlags.find(f => !['CAN','BLOQ'].includes(f.label));
                 val = mainTag ? mainTag.label : val;
             }
-            
-            if (!map[val]) map[val] = { label: val, count: 0, total: 0 };
+            if (!map[val]) map[val] = { label: val, count: 0, total: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0 };
             map[val].count += 1; 
             map[val].total += item.v_empenhado;
+            map[val].liquidado += item.v_liquidado;
+            map[val].a_liquidar += item.v_a_liquidar;
+            map[val].pago += item.v_pago;
+            map[val].a_pagar += item.v_a_pagar;
+            map[val].bloqueado += item.v_bloqueado;
+            map[val].cancelado += item.v_cancelado;
+            map[val].executado += item.v_executado;
         });
-        let sorted = Object.values(map).sort((a, b) => b[metric] - a[metric]);
-        if (sorted.length > 10) {
-            const top9 = sorted.slice(0, 9);
-            const others = sorted.slice(9).reduce((acc, curr) => {
-                acc.count += curr.count;
-                acc.total += curr.total;
-                return acc;
-            }, { label: "OUTROS", count: 0, total: 0 });
-            return [...top9, others];
-        }
-        return sorted;
+        return Object.values(map);
     };
 
-    const getChartData = (keyName) => {
-        const map = {};
-        filteredData.forEach(item => {
-            const k = item[keyName];
-            if (!map[k]) map[k] = { label: k, count: 0, total: 0 };
-            map[k].count += 1;
-            map[k].total += item.v_empenhado;
-        });
-        return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 10);
-    };
-
-    const modDataV = getPieData('modalidade', 'total');
-    const modDataQ = getPieData('modalidade', 'count');
-    const secDataV = getPieData('sec_log', 'total');
-    const secDataQ = getPieData('sec_log', 'count');
-    const compraDataV = getPieData('compra', 'total');
-    const compraDataQ = getPieData('compra', 'count');
-    const fornPieDataV = getPieData('fornecedor', 'total');
-    const fornPieDataQ = getPieData('fornecedor', 'count');
-    const anoVigIniDataV = getPieData('ano_vig_ini', 'total');
-    const anoVigIniDataQ = getPieData('ano_vig_ini', 'count');
+    const modData = getPieDataFull('modalidade');
+    const secData = getPieDataFull('sec_log');
+    const compraData = getPieDataFull('compra');
+    const fornData = getPieDataFull('fornecedor');
+    const anoVigIniData = getPieDataFull('ano_vig_ini');
     
     // Gráficos Situação restritos a apenas as 7 TAGS
     const allowedSitTags = ['ATIVO INEXEC', 'ATIVO EM EXEC', 'ATIVO EXEC TOT', 'ATIVO EXEC PARC', 'VENC INEXEC TOT', 'VENC EXEC TOT', 'VENC EXEC PARC'];
     const sitFilter = (item) => item.situacaoFlags.some(f => allowedSitTags.includes(f.label));
-    const situacaoDataV = getPieData('situacao', 'total', sitFilter);
-    const situacaoDataQ = getPieData('situacao', 'count', sitFilter);
+    const situacaoData = getPieDataFull('situacao', sitFilter);
 
     const getTop20Key = (item, mode) => {
         if (mode === 'contrato') return item.contrato;
@@ -1461,7 +1511,7 @@ function Dashboard() {
                             { label: 'Emp. Titular', data: gestorDataProcessed.map(d => d.emp_tit), backgroundColor: '#3b82f6', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
                             { label: 'Emp. Substituto', data: gestorDataProcessed.map(d => d.emp_sub), backgroundColor: '#93c5fd', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } }
                         ]
-                    }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 20, scaleID: 'x1' }, datalabels: { display: false }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
+                    }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 20, scaleID: 'x1' }, datalabels: { display: true }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e QTD por Fiscal</h3>
@@ -1473,32 +1523,32 @@ function Dashboard() {
                             { label: 'Emp. Titular', data: fiscalDataProcessed.map(d => d.emp_tit), backgroundColor: '#22c55e', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
                             { label: 'Emp. Substituto', data: fiscalDataProcessed.map(d => d.emp_sub), backgroundColor: '#86efac', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } }
                         ]
-                    }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 10, scaleID: 'x1' }, datalabels: { display: false }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
+                    }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 10, scaleID: 'x1' }, datalabels: { display: true }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
                 </div>
             </div>
 
             {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 1) */}
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-                <ToggleableChartCard id="pModV" title="Empenhado (Mod)" data={modDataV} pieMetric="total" />
-                <ToggleableChartCard id="pModQ" title="QTD Contratos (Mod)" data={modDataQ} pieMetric="count" />
-                <ToggleableChartCard id="pSecV" title="Empenhado (SEC)" data={secDataV} pieMetric="total" />
-                <ToggleableChartCard id="pSecQ" title="QTD Contratos (SEC)" data={secDataQ} pieMetric="count" />
+                <ToggleableChartCard id="pModV" title="Empenhado (Mod)" data={modData} isFinancial={true} />
+                <ToggleableChartCard id="pModQ" title="QTD Contratos (Mod)" data={modData} isFinancial={false} />
+                <ToggleableChartCard id="pSecV" title="Empenhado (SEC)" data={secData} isFinancial={true} />
+                <ToggleableChartCard id="pSecQ" title="QTD Contratos (SEC)" data={secData} isFinancial={false} />
             </div>
 
             {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 2) */}
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-                <ToggleableChartCard id="pCompV" title="Empenhado (Nr Compra)" data={compraDataV} pieMetric="total" />
-                <ToggleableChartCard id="pCompQ" title="QTD Contratos (Nr Compra)" data={compraDataQ} pieMetric="count" />
-                <ToggleableChartCard id="pFornV" title="Empenhado (Fornecedor)" data={fornPieDataV} pieMetric="total" isFornecedor={true} />
-                <ToggleableChartCard id="pFornQ" title="QTD Contratos (Fornecedor)" data={fornPieDataQ} pieMetric="count" isFornecedor={true} />
+                <ToggleableChartCard id="pCompV" title="Empenhado (Nr Compra)" data={compraData} isFinancial={true} />
+                <ToggleableChartCard id="pCompQ" title="QTD Contratos (Nr Compra)" data={compraData} isFinancial={false} />
+                <ToggleableChartCard id="pFornV" title="Empenhado (Fornecedor)" data={fornData} isFinancial={true} isFornecedor={true} />
+                <ToggleableChartCard id="pFornQ" title="QTD Contratos (Fornecedor)" data={fornData} isFinancial={false} isFornecedor={true} />
             </div>
 
             {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 3) */}
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
-                <ToggleableChartCard id="pAnoVigV" title="Empenhado (Ano Vig Ini)" data={anoVigIniDataV} pieMetric="total" />
-                <ToggleableChartCard id="pAnoVigQ" title="QTD Contratos (Ano Vig Ini)" data={anoVigIniDataQ} pieMetric="count" />
-                <ToggleableChartCard id="pSitV" title="Empenhado (Situação)" data={situacaoDataV} pieMetric="total" />
-                <ToggleableChartCard id="pSitQ" title="QTD Contratos (Situação)" data={situacaoDataQ} pieMetric="count" />
+                <ToggleableChartCard id="pAnoVigV" title="Empenhado (Ano Vig Ini)" data={anoVigIniData} isFinancial={true} />
+                <ToggleableChartCard id="pAnoVigQ" title="QTD Contratos (Ano Vig Ini)" data={anoVigIniData} isFinancial={false} />
+                <ToggleableChartCard id="pSitV" title="Empenhado (Situação)" data={situacaoData} isFinancial={true} />
+                <ToggleableChartCard id="pSitQ" title="QTD Contratos (Situação)" data={situacaoData} isFinancial={false} />
             </div>
 
             {/* TOP 20: EXECUÇÃO ORÇAMENTÁRIA */}
@@ -1510,9 +1560,13 @@ function Dashboard() {
                             <select value={top20Sort} onChange={(e) => setTop20Sort(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
                                 <option value="valor_desc">Maior Valor</option><option value="qtd_desc">Maior QTD</option><option value="nome_asc">Ordem A-Z</option>
                             </select>
-                            <button onClick={() => setTop20ViewMode(top20ViewMode === 'fornecedor' ? 'contrato' : 'fornecedor')} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer">
-                                {top20ViewMode === 'fornecedor' ? '► VER POR CONTRATO' : '► VER POR FORNECEDOR'}
-                            </button>
+                            <select value={top20ViewMode} onChange={(e) => setTop20ViewMode(e.target.value)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer outline-none">
+                                <option value="fornecedor">VER POR FORNECEDOR</option>
+                                <option value="contrato">VER POR CONTRATO</option>
+                                <option value="ano">VER POR ANO</option>
+                                <option value="modalidade">VER POR MODALIDADE</option>
+                                <option value="sec_log">VER POR SEC LOG</option>
+                            </select>
                         </div>
                     </div>
                     <div className="h-[400px]">
@@ -1638,7 +1692,7 @@ function Dashboard() {
                                         }
                                     }
                                 }, 
-                                datalabels: { display: false },
+                                datalabels: { display: true },
                                 legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 } } }
                             },
                             scales: { 
@@ -1853,8 +1907,12 @@ function Dashboard() {
                                 <NumericHeader widthClass="w-[6%]" label="Empenhado" field="v_empenhado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
                                 <NumericHeader widthClass="w-[6%]" label="Liquidado" field="v_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
                                 <NumericHeader widthClass="w-[4%]" label="Liq %" field="p_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
+                                <NumericHeader widthClass="w-[6%]" label="A Liquidar" field="v_a_liquidar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
+                                <NumericHeader widthClass="w-[4%]" label="A Liq %" field="p_a_liquidar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
                                 <NumericHeader widthClass="w-[6%]" label="Pago" field="v_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
                                 <NumericHeader widthClass="w-[4%]" label="Pago %" field="p_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
+                                <NumericHeader widthClass="w-[6%]" label="A Pagar" field="v_a_pagar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
+                                <NumericHeader widthClass="w-[4%]" label="A Pagar %" field="p_a_pagar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
                                 <NumericHeader widthClass="w-[6%]" label="Bloqueado" field="v_bloqueado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
                                 <NumericHeader widthClass="w-[4%]" label="Bloq %" field="p_bloqueado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
                                 <NumericHeader widthClass="w-[6%]" label="Cancelado" field="v_cancelado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
@@ -1899,10 +1957,19 @@ function Dashboard() {
                                         {formatBRL(row.v_global)}
                                     </td>
                                     <td className="p-3 text-right font-bold text-blue-700">{formatBRL(row.v_empenhado)}</td>
+                                    
                                     <td className="p-3 text-right font-bold text-amber-600">{formatBRL(row.v_liquidado)}</td>
                                     <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_liquidado)}</td>
+                                    
+                                    <td className="p-3 text-right font-bold text-amber-500">{formatBRL(row.v_a_liquidar)}</td>
+                                    <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_a_liquidar)}</td>
+
                                     <td className="p-3 text-right font-black text-emerald-600">{formatBRL(row.v_pago)}</td>
                                     <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_pago)}</td>
+                                    
+                                    <td className="p-3 text-right font-bold text-emerald-500">{formatBRL(row.v_a_pagar)}</td>
+                                    <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_a_pagar)}</td>
+
                                     <td className="p-3 text-right font-bold text-rose-600">{formatBRL(row.v_bloqueado)}</td>
                                     <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_bloqueado)}</td>
                                     <td className="p-3 text-right font-bold text-red-600">{formatBRL(row.v_cancelado)}</td>
@@ -1920,7 +1987,11 @@ function Dashboard() {
                                 <td className="p-3 text-right text-blue-800">{formatBRL(totalsMaster.emp)}</td>
                                 <td className="p-3 text-right text-amber-800">{formatBRL(totalsMaster.liq)}</td>
                                 <td className="p-3 text-center">-</td>
+                                <td className="p-3 text-right text-amber-600">{formatBRL(totalsMaster.a_liq)}</td>
+                                <td className="p-3 text-center">-</td>
                                 <td className="p-3 text-right text-emerald-800">{formatBRL(totalsMaster.pag)}</td>
+                                <td className="p-3 text-center">-</td>
+                                <td className="p-3 text-right text-emerald-600">{formatBRL(totalsMaster.a_pag)}</td>
                                 <td className="p-3 text-center">-</td>
                                 <td className="p-3 text-right text-orange-800">{formatBRL(totalsMaster.blo)}</td>
                                 <td className="p-3 text-center">-</td>
