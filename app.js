@@ -135,6 +135,30 @@ const scatterQuadrantPlugin = {
 };
 Chart.register(scatterQuadrantPlugin);
 
+// Linha Tracejada Vermelha para os 50% do Gráfico de 100%
+const fiftyPercentLinePlugin = {
+    id: 'fiftyPercentLinePlugin',
+    afterDatasetsDraw: (chart) => {
+        if (chart.config.options.plugins.fiftyPercentLinePlugin?.display) {
+            const ctx = chart.ctx;
+            const yAxis = chart.scales.y;
+            const xAxis = chart.scales.x;
+            if (!yAxis || !xAxis) return;
+            const y50 = yAxis.getPixelForValue(50);
+            ctx.save();
+            ctx.beginPath();
+            ctx.setLineDash([5, 5]);
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(239, 68, 68, 0.9)'; // Vermelho
+            ctx.moveTo(xAxis.left, y50);
+            ctx.lineTo(xAxis.right, y50);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+};
+Chart.register(fiftyPercentLinePlugin);
+
 // Mapa de cores unificado para TAGS de Situação e Gráfico de Dispersão
 const tagColorsMap = {
     'ATIVO INEXEC': { css: 'bg-purple-700 text-white', hex: '#7e22ce' },
@@ -364,17 +388,24 @@ const getFullTooltipContrato = (dataArray) => ({
         label: function(context) {
             let label = context.dataset.label || '';
             if (label) label += ': ';
+            const idx = context.dataIndex;
+            const item = dataArray[idx];
+            
             if (context.dataset.yAxisID === 'y_perc' || label.includes('%')) {
                 label += formatPercentBR(context.raw);
                 if (context.dataset.label === '% Tempo') {
-                    const item = dataArray[context.dataIndex];
                     const dias = item.encerrando_dias !== null ? `${item.encerrando_dias} d` : '-';
                     label += ` (Faltam: ${dias})`;
+                } else if (context.dataset.label === '% Execução') {
+                    label += ` (${formatBRL(item.v_executado)})`;
+                } else if (context.dataset.label === '% Liquidado') {
+                    label += ` (${formatBRL(item.v_liquidado)})`;
+                } else if (context.dataset.label === '% Exec. Líquida') {
+                    label += ` (${formatBRL(item.v_pago)})`;
                 }
             } else {
                 label += formatBRL(context.raw);
                 if (context.dataset.label === 'Valor Empenhado') {
-                    const item = dataArray[context.dataIndex];
                     label += `\nGlobal: ${formatBRL(item.v_global)}`;
                 }
             }
@@ -1425,10 +1456,10 @@ function Dashboard() {
                     <ChartComponent id="gGestor" type="bar" data={{
                         labels: gestorDataProcessed.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
-                            { label: 'QTD Titular', data: gestorDataProcessed.map(d => d.qtd_tit), backgroundColor: '#eab308', xAxisID: 'x1', stack: 'StackQtd' },
-                            { label: 'QTD Substituto', data: gestorDataProcessed.map(d => d.qtd_sub), backgroundColor: '#fde047', xAxisID: 'x1', stack: 'StackQtd' },
-                            { label: 'Emp. Titular', data: gestorDataProcessed.map(d => d.emp_tit), backgroundColor: '#3b82f6', xAxisID: 'x', stack: 'StackEmp' },
-                            { label: 'Emp. Substituto', data: gestorDataProcessed.map(d => d.emp_sub), backgroundColor: '#93c5fd', xAxisID: 'x', stack: 'StackEmp' }
+                            { label: 'QTD Titular', data: gestorDataProcessed.map(d => d.qtd_tit), backgroundColor: '#eab308', xAxisID: 'x1', stack: 'StackQtd', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                            { label: 'QTD Substituto', data: gestorDataProcessed.map(d => d.qtd_sub), backgroundColor: '#fde047', xAxisID: 'x1', stack: 'StackQtd', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                            { label: 'Emp. Titular', data: gestorDataProcessed.map(d => d.emp_tit), backgroundColor: '#3b82f6', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                            { label: 'Emp. Substituto', data: gestorDataProcessed.map(d => d.emp_sub), backgroundColor: '#93c5fd', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } }
                         ]
                     }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 20, scaleID: 'x1' }, datalabels: { display: false }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
                 </div>
@@ -1437,10 +1468,10 @@ function Dashboard() {
                     <ChartComponent id="gFiscal" type="bar" data={{
                         labels: fiscalDataProcessed.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
-                            { label: 'QTD Titular', data: fiscalDataProcessed.map(d => d.qtd_tit), backgroundColor: '#f97316', xAxisID: 'x1', stack: 'StackQtd' },
-                            { label: 'QTD Substituto', data: fiscalDataProcessed.map(d => d.qtd_sub), backgroundColor: '#fcd34d', xAxisID: 'x1', stack: 'StackQtd' },
-                            { label: 'Emp. Titular', data: fiscalDataProcessed.map(d => d.emp_tit), backgroundColor: '#22c55e', xAxisID: 'x', stack: 'StackEmp' },
-                            { label: 'Emp. Substituto', data: fiscalDataProcessed.map(d => d.emp_sub), backgroundColor: '#86efac', xAxisID: 'x', stack: 'StackEmp' }
+                            { label: 'QTD Titular', data: fiscalDataProcessed.map(d => d.qtd_tit), backgroundColor: '#f97316', xAxisID: 'x1', stack: 'StackQtd', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                            { label: 'QTD Substituto', data: fiscalDataProcessed.map(d => d.qtd_sub), backgroundColor: '#fcd34d', xAxisID: 'x1', stack: 'StackQtd', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                            { label: 'Emp. Titular', data: fiscalDataProcessed.map(d => d.emp_tit), backgroundColor: '#22c55e', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                            { label: 'Emp. Substituto', data: fiscalDataProcessed.map(d => d.emp_sub), backgroundColor: '#86efac', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } }
                         ]
                     }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 10, scaleID: 'x1' }, datalabels: { display: false }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
                 </div>
@@ -1479,13 +1510,9 @@ function Dashboard() {
                             <select value={top20Sort} onChange={(e) => setTop20Sort(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
                                 <option value="valor_desc">Maior Valor</option><option value="qtd_desc">Maior QTD</option><option value="nome_asc">Ordem A-Z</option>
                             </select>
-                            <select value={top20ViewMode} onChange={(e) => setTop20ViewMode(e.target.value)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer outline-none">
-                                <option value="fornecedor">VER POR FORNECEDOR</option>
-                                <option value="contrato">VER POR CONTRATO</option>
-                                <option value="ano">VER POR ANO</option>
-                                <option value="modalidade">VER POR MODALIDADE</option>
-                                <option value="sec_log">VER POR SEC LOG</option>
-                            </select>
+                            <button onClick={() => setTop20ViewMode(top20ViewMode === 'fornecedor' ? 'contrato' : 'fornecedor')} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer">
+                                {top20ViewMode === 'fornecedor' ? '► VER POR CONTRATO' : '► VER POR FORNECEDOR'}
+                            </button>
                         </div>
                     </div>
                     <div className="h-[400px]">
@@ -1561,10 +1588,10 @@ function Dashboard() {
                             labels: top20100DataProcessed.map(d => formatLabelMultiLine(top20100ViewMode === 'fornecedor' ? d.label.replace(/^[\d\.\-\/]+\s*-\s*/, '') : d.label)),
                             datasets: [
                                 // Fundo / Stack de Componentes da Despesa (Somam 100% do Empenho) - Agrupados juntos e com Z-index mais baixo
-                                { label: 'Liquidado %', data: top20100DataProcessed.map(d => d.total ? (d.liquidado / d.total) * 100 : 0), backgroundColor: '#f59e0b', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: false } },
-                                { label: 'A Liquidar %', data: top20100DataProcessed.map(d => d.total ? Math.max(0, ((d.total - d.liquidado - d.bloqueado - d.cancelado) / d.total) * 100) : 0), backgroundColor: '#cbd5e1', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: false } },
-                                { label: 'Bloqueado %', data: top20100DataProcessed.map(d => d.total ? (d.bloqueado / d.total) * 100 : 0), backgroundColor: '#f97316', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: false } },
-                                { label: 'Cancelado %', data: top20100DataProcessed.map(d => d.total ? (d.cancelado / d.total) * 100 : 0), backgroundColor: '#ef4444', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: false } },
+                                { label: 'Liquidado %', data: top20100DataProcessed.map(d => d.total ? (d.liquidado / d.total) * 100 : 0), backgroundColor: '#f59e0b', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v, ctx) => shortenNumber(top20100DataProcessed[ctx.dataIndex].liquidado) } },
+                                { label: 'A Liquidar %', data: top20100DataProcessed.map(d => d.total ? Math.max(0, ((d.total - d.liquidado - d.bloqueado - d.cancelado) / d.total) * 100) : 0), backgroundColor: '#cbd5e1', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#1e293b', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v, ctx) => shortenNumber(Math.max(0, top20100DataProcessed[ctx.dataIndex].total - top20100DataProcessed[ctx.dataIndex].liquidado - top20100DataProcessed[ctx.dataIndex].bloqueado - top20100DataProcessed[ctx.dataIndex].cancelado)) } },
+                                { label: 'Bloqueado %', data: top20100DataProcessed.map(d => d.total ? (d.bloqueado / d.total) * 100 : 0), backgroundColor: '#f97316', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v, ctx) => shortenNumber(top20100DataProcessed[ctx.dataIndex].bloqueado) } },
+                                { label: 'Cancelado %', data: top20100DataProcessed.map(d => d.total ? (d.cancelado / d.total) * 100 : 0), backgroundColor: '#ef4444', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v, ctx) => shortenNumber(top20100DataProcessed[ctx.dataIndex].cancelado) } },
                                 
                                 // Empenhado Base (Borda Azul sobrepondo Tudo)
                                 { label: 'Empenhado (100%)', data: top20100DataProcessed.map(d => 100), backgroundColor: 'transparent', borderColor: '#3b82f6', borderWidth: 2, xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '2', order: 3, datalabels: { display: false } },
@@ -1579,6 +1606,7 @@ function Dashboard() {
                             indexAxis: 'x', responsive: true, maintainAspectRatio: false, 
                             interaction: { mode: 'index', intersect: false },
                             plugins: { 
+                                fiftyPercentLinePlugin: { display: true },
                                 tooltip: {
                                     callbacks: {
                                         title: function(context) { return context[0].label; },
