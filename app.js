@@ -895,10 +895,10 @@ function Dashboard() {
     };
     
     const [sortConfig, setSortConfig] = useState({ key: 'v_empenhado', direction: 'desc' });
-    const [top20Sort, setTop20Sort] = useState('valor_desc');
+    const [top20Sort, setTop20Sort] = useState('emp_desc');
     const [top20ViewMode, setTop20ViewMode] = useState('fornecedor');
     
-    const [top20100Sort, setTop20100Sort] = useState('valor_desc');
+    const [top20100Sort, setTop20100Sort] = useState('emp_desc');
     const [top20100ViewMode, setTop20100ViewMode] = useState('fornecedor');
 
     const [fornecedorSort, setFornecedorSort] = useState('valor_desc');
@@ -930,6 +930,24 @@ function Dashboard() {
     const [searchFornecedor, setSearchFornecedor] = useState("");
     const [searchObjeto, setSearchObjeto] = useState("");
     const [searchGestorFiscal, setSearchGestorFiscal] = useState("");
+
+    const [showMasterColsMenu, setShowMasterColsMenu] = useState(false);
+    const masterColumnLabels = {
+        contrato: "CONTRATO", situacao: "SITUAÇÃO", fornecedor: "FORNECEDOR", objeto: "OBJETO", gestorFiscal: "GESTORES/FISCAIS",
+        dataInic: "INÍCIO", dataFim: "FIM", percTempo: "% TEMPO", diasPassaram: "PASSARAM", encerrandoDias: "FALTAM",
+        difGlobal: "GLOBAL-EMP", vGlobal: "GLOBAL", empenhado: "EMPENHADO", liquidado: "LIQUIDADO", pLiquidado: "LIQ %",
+        aLiquidar: "A LIQUIDAR", pALiquidar: "A LIQ %", pago: "PAGO", pPago: "PAGO %", aPagar: "A PAGAR", pAPagar: "A PAGAR %",
+        bloqueado: "BLOQUEADO", pBloqueado: "BLOQ %", cancelado: "CANCELADO", pCancelado: "CANC %", executado: "EXECUTADO", pExecutado: "EXEC %",
+        execLiq: "EXEC LIQ", pExecLiq: "EXEC LIQ %"
+    };
+    const [masterVisibleCols, setMasterVisibleCols] = useState({
+        contrato: true, situacao: true, fornecedor: true, objeto: true, gestorFiscal: true,
+        dataInic: true, dataFim: true, percTempo: true, diasPassaram: true, encerrandoDias: true,
+        difGlobal: true, vGlobal: true, empenhado: true, liquidado: true, pLiquidado: true,
+        aLiquidar: true, pALiquidar: true, pago: true, pPago: true, aPagar: true, pAPagar: true,
+        bloqueado: true, pBloqueado: true, cancelado: true, pCancelado: true, executado: true, pExecutado: true,
+        execLiq: true, pExecLiq: true
+    });
 
     const initialNumFilters = {
         perc_tempo: {min:'', max:''}, dias_passaram: {min:'', max:''}, encerrando_dias: {min:'', max:''}, 
@@ -1231,13 +1249,13 @@ function Dashboard() {
     }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
 
     const totalsMaster = useMemo(() => {
-        let emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
+        let global = 0, dif = 0, emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
         filteredData.forEach(r => { 
-            emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; 
+            global += r.v_global; dif += r.dif_global; emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; 
             blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; 
             a_liq += r.v_a_liquidar; a_pag += r.v_a_pagar; 
         });
-        return { emp, liq, pag, blo, can, exe, a_liq, a_pag };
+        return { global, dif, emp, liq, pag, blo, can, exe, a_liq, a_pag };
     }, [filteredData]);
 
     const kpis = useMemo(() => {
@@ -1349,24 +1367,50 @@ function Dashboard() {
         return item.fornecedor;
     };
 
+    const sortTop20Array = (arr, sortKey) => {
+        const metricMap = {
+            valor_desc: 'total', emp_desc: 'total', rec_desc: 'recebido', liq_desc: 'liquidado', pag_desc: 'pago',
+            can_desc: 'cancelado', bloq_desc: 'bloqueado', aliq_desc: 'a_liquidar', apag_desc: 'a_pagar', qtd_desc: 'count'
+        };
+        if (sortKey === 'nome_asc') return arr.sort((a, b) => a.label.localeCompare(b.label));
+        if (sortKey === 'nome_desc') return arr.sort((a, b) => b.label.localeCompare(a.label));
+        const metric = metricMap[sortKey] || 'total';
+        return arr.sort((a, b) => (b[metric] || 0) - (a[metric] || 0));
+    };
+
+    const renderTop20SortOptions = () => (
+        <>
+            <option value="emp_desc">MAIOR EMPENHO</option>
+            <option value="rec_desc">MAIOR RECEBIDO</option>
+            <option value="liq_desc">MAIOR LIQUIDADO</option>
+            <option value="pag_desc">MAIOR PAGO</option>
+            <option value="can_desc">MAIOR CANCELADO</option>
+            <option value="bloq_desc">MAIOR BLOQUEADO</option>
+            <option value="aliq_desc">MAIOR A LIQUIDAR</option>
+            <option value="apag_desc">MAIOR A PAGAR</option>
+            <option value="qtd_desc">MAIOR QTD</option>
+            <option value="nome_asc">ORDEM A-Z</option>
+        </>
+    );
+
     const top20DataProcessed = useMemo(() => {
         const map = {};
         filteredData.forEach(item => {
             const key = getTop20Key(item, top20ViewMode);
-            if (!map[key]) map[key] = { label: key, count: 0, total: 0, liquidado: 0, pago: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
+            if (!map[key]) map[key] = { label: key, count: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
             map[key].count += 1; 
             map[key].total += item.v_empenhado;
+            map[key].recebido += item.v_recebido || 0;
             map[key].liquidado += item.v_liquidado;
+            map[key].a_liquidar += item.v_a_liquidar;
             map[key].pago += item.v_pago;
+            map[key].a_pagar += item.v_a_pagar;
             map[key].bloqueado += item.v_bloqueado;
             map[key].cancelado += item.v_cancelado;
             map[key].executado += item.v_executado;
         });
         let arr = Object.values(map);
-        if (top20Sort === 'valor_desc') arr.sort((a, b) => b.total - a.total);
-        else if (top20Sort === 'qtd_desc') arr.sort((a, b) => b.count - a.count);
-        else if (top20Sort === 'nome_asc') arr.sort((a, b) => a.label.localeCompare(b.label));
-        else if (top20Sort === 'nome_desc') arr.sort((a, b) => b.label.localeCompare(a.label));
+        sortTop20Array(arr, top20Sort);
         return arr.slice(0, 20); 
     }, [filteredData, top20Sort, top20ViewMode]);
     
@@ -1375,20 +1419,20 @@ function Dashboard() {
         const map = {};
         filteredData.forEach(item => {
             const key = getTop20Key(item, top20100ViewMode);
-            if (!map[key]) map[key] = { label: key, count: 0, total: 0, liquidado: 0, pago: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
+            if (!map[key]) map[key] = { label: key, count: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
             map[key].count += 1; 
             map[key].total += item.v_empenhado;
+            map[key].recebido += item.v_recebido || 0;
             map[key].liquidado += item.v_liquidado;
+            map[key].a_liquidar += item.v_a_liquidar;
             map[key].pago += item.v_pago;
+            map[key].a_pagar += item.v_a_pagar;
             map[key].bloqueado += item.v_bloqueado;
             map[key].cancelado += item.v_cancelado;
             map[key].executado += item.v_executado;
         });
         let arr = Object.values(map);
-        if (top20100Sort === 'valor_desc') arr.sort((a, b) => b.total - a.total);
-        else if (top20100Sort === 'qtd_desc') arr.sort((a, b) => b.count - a.count);
-        else if (top20100Sort === 'nome_asc') arr.sort((a, b) => a.label.localeCompare(b.label));
-        else if (top20100Sort === 'nome_desc') arr.sort((a, b) => b.label.localeCompare(a.label));
+        sortTop20Array(arr, top20100Sort);
         return arr.slice(0, 20); 
     }, [filteredData, top20100Sort, top20100ViewMode]);
 
@@ -1465,6 +1509,43 @@ function Dashboard() {
     const pQ3 = totalBubbles ? ((q3Normal / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
     const pQ4 = totalBubbles ? ((q4Otimo / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
 
+    const masterNonMetricColCount = [
+        'contrato', 'situacao', 'fornecedor', 'objeto', 'gestorFiscal', 'dataInic', 'dataFim', 'percTempo', 'diasPassaram', 'encerrandoDias'
+    ].filter(k => masterVisibleCols[k]).length;
+
+    const getMasterExportCols = () => {
+        let cols = [];
+        if (masterVisibleCols.contrato) cols.push({ header: "CONTRATO", key: "contrato" });
+        if (masterVisibleCols.situacao) cols.push({ header: "SITUAÇÃO", key: "situacao" });
+        if (masterVisibleCols.fornecedor) cols.push({ header: "FORNECEDOR", key: "fornecedor" });
+        if (masterVisibleCols.objeto) cols.push({ header: "OBJETO", key: "objeto" });
+        if (masterVisibleCols.gestorFiscal) cols.push({ header: "GESTOR/FISCAL", key: "gestor", format: (r) => `GT: ${r.gestor} | GS: ${r.gestor_sub} | FT: ${r.fiscal} | FS: ${r.fiscal_sub}` });
+        if (masterVisibleCols.dataInic) cols.push({ header: "INÍCIO", key: "data_inic" });
+        if (masterVisibleCols.dataFim) cols.push({ header: "FIM", key: "data_fim" });
+        if (masterVisibleCols.percTempo) cols.push({ header: "% TEMPO", key: "perc_tempo", isPercent: true });
+        if (masterVisibleCols.diasPassaram) cols.push({ header: "PASSARAM", key: "dias_passaram" });
+        if (masterVisibleCols.encerrandoDias) cols.push({ header: "FALTAM", key: "encerrando_dias" });
+        if (masterVisibleCols.difGlobal) cols.push({ header: "GLOBAL-EMP", key: "dif_global", isCurrency: true });
+        if (masterVisibleCols.vGlobal) cols.push({ header: "GLOBAL", key: "v_global", isCurrency: true });
+        if (masterVisibleCols.empenhado) cols.push({ header: "EMPENHADO", key: "v_empenhado", isCurrency: true });
+        if (masterVisibleCols.liquidado) cols.push({ header: "LIQUIDADO", key: "v_liquidado", isCurrency: true });
+        if (masterVisibleCols.pLiquidado) cols.push({ header: "LIQ %", key: "p_liquidado", isPercent: true });
+        if (masterVisibleCols.aLiquidar) cols.push({ header: "A LIQUIDAR", key: "v_a_liquidar", isCurrency: true });
+        if (masterVisibleCols.pALiquidar) cols.push({ header: "A LIQ %", key: "p_a_liquidar", isPercent: true });
+        if (masterVisibleCols.pago) cols.push({ header: "PAGO", key: "v_pago", isCurrency: true });
+        if (masterVisibleCols.pPago) cols.push({ header: "PAGO %", key: "p_pago", isPercent: true });
+        if (masterVisibleCols.aPagar) cols.push({ header: "A PAGAR", key: "v_a_pagar", isCurrency: true });
+        if (masterVisibleCols.pAPagar) cols.push({ header: "A PAGAR %", key: "p_a_pagar", isPercent: true });
+        if (masterVisibleCols.bloqueado) cols.push({ header: "BLOQUEADO", key: "v_bloqueado", isCurrency: true });
+        if (masterVisibleCols.pBloqueado) cols.push({ header: "BLOQ %", key: "p_bloqueado", isPercent: true });
+        if (masterVisibleCols.cancelado) cols.push({ header: "CANCELADO", key: "v_cancelado", isCurrency: true });
+        if (masterVisibleCols.pCancelado) cols.push({ header: "CANC %", key: "p_cancelado", isPercent: true });
+        if (masterVisibleCols.executado) cols.push({ header: "EXECUTADO", key: "v_executado", isCurrency: true });
+        if (masterVisibleCols.pExecutado) cols.push({ header: "EXEC %", key: "p_executado", isPercent: true });
+        if (masterVisibleCols.execLiq) cols.push({ header: "EXEC LIQ", key: "v_pago", isCurrency: true });
+        if (masterVisibleCols.pExecLiq) cols.push({ header: "EXEC LIQ %", key: "p_pago", isPercent: true });
+        return cols;
+    };
 
     if (loading) return (
         <div className="h-screen flex flex-col items-center justify-center font-black text-slate-400 gap-4">
@@ -1541,7 +1622,7 @@ function Dashboard() {
                 </button>
             </div>
 
-            <CollapsibleSection title="INDICADORES DE DESEMPENHO (KPIs)" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
+            <CollapsibleSection title="INDICADORES DE DESEMPENHO (KPIs)" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 mb-4">
                 <KPICard title="QTD Contratos" value={kpis.qtdContratos} color="slate" isCurrency={false} />
                 <KPICard title="QTD Ativos" value={kpis.qtdAtivos} extraText={`Inexec: ${kpis.qtdAtivosInexec}\nEm Exec: ${kpis.qtdAtivosEmExec}\nExec Tot: ${kpis.qtdAtivosExecTot}\nExec Parc: ${kpis.qtdAtivosExecParc}`} color="blue" isCurrency={false} />
@@ -1563,7 +1644,7 @@ function Dashboard() {
             </div>
             </CollapsibleSection>
 
-            <CollapsibleSection title="ESTATÍSTICAS" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
+            <CollapsibleSection title="ESTATÍSTICAS" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e QTD por Gestor</h3>
@@ -1617,7 +1698,7 @@ function Dashboard() {
 
             </CollapsibleSection>
 
-            <CollapsibleSection title="GRÁFICOS DE EXECUÇÃO" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
+            <CollapsibleSection title="GRÁFICOS DE EXECUÇÃO" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
             {/* TOP 20: EXECUÇÃO ORÇAMENTÁRIA */}
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -1625,7 +1706,7 @@ function Dashboard() {
                         <h3 className="text-xs font-black text-slate-800 uppercase">EXECUÇÃO ORÇAMENTÁRIA E QTD (TOP 20)</h3>
                         <div className="flex gap-2 items-center">
                             <select value={top20Sort} onChange={(e) => setTop20Sort(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
-                                <option value="valor_desc">Maior Valor</option><option value="qtd_desc">Maior QTD</option><option value="nome_asc">Ordem A-Z</option>
+                                {renderTop20SortOptions()}
                             </select>
                             <select value={top20ViewMode} onChange={(e) => setTop20ViewMode(e.target.value)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer outline-none">
                                 <option value="fornecedor">VER POR FORNECEDOR</option>
@@ -1693,7 +1774,7 @@ function Dashboard() {
                         <h3 className="text-xs font-black text-slate-800 uppercase">EXECUÇÃO ORÇAMENTÁRIA E QTD EM 100 % (TOP 20)</h3>
                         <div className="flex gap-2 items-center">
                             <select value={top20100Sort} onChange={(e) => setTop20100Sort(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
-                                <option value="valor_desc">Maior Valor</option><option value="qtd_desc">Maior QTD</option><option value="nome_asc">Ordem A-Z</option>
+                                {renderTop20SortOptions()}
                             </select>
                             <select value={top20100ViewMode} onChange={(e) => setTop20100ViewMode(e.target.value)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer outline-none">
                                 <option value="fornecedor">VER POR FORNECEDOR</option>
@@ -1946,131 +2027,140 @@ function Dashboard() {
 
             </CollapsibleSection>
 
-            <CollapsibleSection title="TABELAS DE EXECUÇÃO" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
+            <CollapsibleSection title="TABELAS DE EXECUÇÃO" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden mb-10">
                 <div className="bg-slate-800 px-4 py-3 flex justify-between items-center flex-wrap gap-2">
                     <h3 className="text-white text-xs font-black tracking-widest uppercase">
                         Detalhamento Financeiro ({kpis.qtdContratos} Contratos Únicos | Mostrando {Math.min(100, filteredData.length)} Lançamentos)
                     </h3>
-                    <div className="flex gap-2">
-                        <button onClick={() => exportTable.toExcel(filteredData, "Detalhamento_Master", exportMasterColumns)} className="text-[10px] font-bold bg-green-600 text-white px-3 py-1 rounded">EXCEL</button>
-                        <button onClick={() => exportTable.toCSV(filteredData, "Detalhamento_Master", exportMasterColumns)} className="text-[10px] font-bold bg-blue-600 text-white px-3 py-1 rounded">CSV</button>
-                        <button onClick={() => exportTable.toPDF(filteredData, "Detalhamento_Master", exportMasterColumns, "DETALHAMENTO FINANCEIRO MASTER")} className="text-[10px] font-bold bg-red-600 text-white px-3 py-1 rounded">PDF</button>
+                    <div className="flex gap-2 items-center">
+                        <div className="relative">
+                            <button onClick={() => setShowMasterColsMenu(!showMasterColsMenu)} className="text-[10px] font-black bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded border border-white/20 shadow transition">
+                                COLUNAS ▼
+                            </button>
+                            {showMasterColsMenu && (
+                                <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-2xl border border-slate-200 z-50 p-3 max-h-[420px] overflow-y-auto custom-scrollbar">
+                                    {Object.keys(masterColumnLabels).map(k => (
+                                        <label key={k} className="flex items-center gap-3 text-[11px] font-black text-slate-700 cursor-pointer hover:bg-slate-50 p-2 rounded uppercase">
+                                            <input type="checkbox" checked={masterVisibleCols[k]} onChange={() => setMasterVisibleCols(p => ({...p, [k]: !p[k]}))} className="w-4 h-4 accent-blue-600 cursor-pointer" />
+                                            {masterColumnLabels[k]}
+                                        </label>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                        <div className="w-[1px] h-5 bg-slate-500 mx-1 hidden sm:block"></div>
+                        <button onClick={() => exportTable.toExcel(filteredData, "Detalhamento_Master", getMasterExportCols())} className="text-[10px] font-bold bg-green-600 text-white px-3 py-1 rounded">EXCEL</button>
+                        <button onClick={() => exportTable.toCSV(filteredData, "Detalhamento_Master", getMasterExportCols())} className="text-[10px] font-bold bg-blue-600 text-white px-3 py-1 rounded">CSV</button>
+                        <button onClick={() => exportTable.toPDF(filteredData, "Detalhamento_Master", getMasterExportCols(), "DETALHAMENTO FINANCEIRO MASTER")} className="text-[10px] font-bold bg-red-600 text-white px-3 py-1 rounded">PDF</button>
                     </div>
                 </div>
                 <div className="overflow-x-auto h-[600px]">
                     <table className="w-full text-left text-[10px] border-collapse relative" style={{ tableLayout: 'fixed', minWidth: '2400px' }}>
                         <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 shadow-sm z-10">
                             <tr className="text-slate-600 uppercase font-black tracking-tighter align-top">
-                                <TextHeader widthClass="w-[7%]" label="Contrato" field="contrato" current={sortConfig} onSort={handleSort} searchVal={searchContrato} onSearchChange={setSearchContrato} />
-                                <TextHeader widthClass="w-[6%]" label="Situação" field="situacao" current={sortConfig} onSort={handleSort} searchVal={searchSituacao} onSearchChange={setSearchSituacao} />
-                                <TextHeader widthClass="w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />
-                                <TextHeader widthClass="w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />
-                                <TextHeader widthClass="w-[7%]" label="Gestores/Fiscais" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />
-                                <DateFilterHeader widthClass="w-[5%]" label="Início" field="data_inic" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />
-                                <DateFilterHeader widthClass="w-[5%]" label="Fim" field="data_fim" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="% Tempo" field="perc_tempo" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[5%]" label="Passaram" field="dias_passaram" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[5%]" label="Faltam" field="encerrando_dias" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="GLOBAL-EMP" field="dif_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[6%]" label="Global" field="v_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[6%]" label="Empenhado" field="v_empenhado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[6%]" label="Liquidado" field="v_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[4%]" label="Liq %" field="p_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="A Liquidar" field="v_a_liquidar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[4%]" label="A Liq %" field="p_a_liquidar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="Pago" field="v_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[4%]" label="Pago %" field="p_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="A Pagar" field="v_a_pagar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[4%]" label="A Pagar %" field="p_a_pagar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="Bloqueado" field="v_bloqueado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[4%]" label="Bloq %" field="p_bloqueado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="Cancelado" field="v_cancelado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[4%]" label="Canc %" field="p_cancelado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="Executado" field="v_executado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[4%]" label="Exec %" field="p_executado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
-                                <NumericHeader widthClass="w-[6%]" label="EXEC LIQ" field="v_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />
-                                <NumericHeader widthClass="w-[4%]" label="EXEC LIQ %" field="p_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />
+                                {masterVisibleCols.contrato && <TextHeader widthClass="w-[7%]" label="Contrato" field="contrato" current={sortConfig} onSort={handleSort} searchVal={searchContrato} onSearchChange={setSearchContrato} />}
+                                {masterVisibleCols.situacao && <TextHeader widthClass="w-[6%]" label="Situação" field="situacao" current={sortConfig} onSort={handleSort} searchVal={searchSituacao} onSearchChange={setSearchSituacao} />}
+                                {masterVisibleCols.fornecedor && <TextHeader widthClass="w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />}
+                                {masterVisibleCols.objeto && <TextHeader widthClass="w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />}
+                                {masterVisibleCols.gestorFiscal && <TextHeader widthClass="w-[7%]" label="Gestores/Fiscais" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />}
+                                {masterVisibleCols.dataInic && <DateFilterHeader widthClass="w-[5%]" label="Início" field="data_inic" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />}
+                                {masterVisibleCols.dataFim && <DateFilterHeader widthClass="w-[5%]" label="Fim" field="data_fim" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />}
+                                {masterVisibleCols.percTempo && <NumericHeader widthClass="w-[6%]" label="% Tempo" field="perc_tempo" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.diasPassaram && <NumericHeader widthClass="w-[5%]" label="Passaram" field="dias_passaram" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.encerrandoDias && <NumericHeader widthClass="w-[5%]" label="Faltam" field="encerrando_dias" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.difGlobal && <NumericHeader widthClass="w-[6%]" label="GLOBAL-EMP" field="dif_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.vGlobal && <NumericHeader widthClass="w-[6%]" label="Global" field="v_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.empenhado && <NumericHeader widthClass="w-[6%]" label="Empenhado" field="v_empenhado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.liquidado && <NumericHeader widthClass="w-[6%]" label="Liquidado" field="v_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pLiquidado && <NumericHeader widthClass="w-[4%]" label="Liq %" field="p_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.aLiquidar && <NumericHeader widthClass="w-[6%]" label="A Liquidar" field="v_a_liquidar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pALiquidar && <NumericHeader widthClass="w-[4%]" label="A Liq %" field="p_a_liquidar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.pago && <NumericHeader widthClass="w-[6%]" label="Pago" field="v_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pPago && <NumericHeader widthClass="w-[4%]" label="Pago %" field="p_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.aPagar && <NumericHeader widthClass="w-[6%]" label="A Pagar" field="v_a_pagar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pAPagar && <NumericHeader widthClass="w-[4%]" label="A Pagar %" field="p_a_pagar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.bloqueado && <NumericHeader widthClass="w-[6%]" label="Bloqueado" field="v_bloqueado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pBloqueado && <NumericHeader widthClass="w-[4%]" label="Bloq %" field="p_bloqueado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.cancelado && <NumericHeader widthClass="w-[6%]" label="Cancelado" field="v_cancelado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pCancelado && <NumericHeader widthClass="w-[4%]" label="Canc %" field="p_cancelado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.executado && <NumericHeader widthClass="w-[6%]" label="Executado" field="v_executado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pExecutado && <NumericHeader widthClass="w-[4%]" label="Exec %" field="p_executado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.execLiq && <NumericHeader widthClass="w-[6%]" label="EXEC LIQ" field="v_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pExecLiq && <NumericHeader widthClass="w-[4%]" label="EXEC LIQ %" field="p_pago" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {filteredData.slice(0, 100).map((row, i) => (
                                 <tr key={i} className="hover:bg-blue-50 transition-colors">
-                                    <td className="p-3 font-black text-slate-800 break-words">
+                                    {masterVisibleCols.contrato && <td className="p-3 font-black text-slate-800 break-words">
                                         {row.contrato}
                                         <div className="text-[8px] font-normal text-slate-500 mt-1 leading-tight">Compra: {row.compra}<br/>Mod: {row.modalidade}</div>
-                                    </td>
-                                    <td className="p-3 align-top">
+                                    </td>}
+                                    {masterVisibleCols.situacao && <td className="p-3 align-top">
                                         <div className="flex flex-wrap gap-1">
                                             {row.situacaoFlags.map((f, idx) => (
                                                 <span key={idx} className={`text-[8px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${f.color}`}>{f.label}</span>
                                             ))}
                                         </div>
-                                    </td>
-                                    <td className="p-3 text-slate-600 font-bold break-words">{row.fornecedor}</td>
-                                    <td className="p-3 text-slate-500 break-words">{row.objeto}</td>
-                                    <td className="p-3 break-words">
+                                    </td>}
+                                    {masterVisibleCols.fornecedor && <td className="p-3 text-slate-600 font-bold break-words">{row.fornecedor}</td>}
+                                    {masterVisibleCols.objeto && <td className="p-3 text-slate-500 break-words">{row.objeto}</td>}
+                                    {masterVisibleCols.gestorFiscal && <td className="p-3 break-words">
                                         <div className="font-bold text-slate-700" title="Gestor Titular">GT: {row.gestor}</div>
                                         {row.gestor_sub !== 'N/I' && <div className="text-[9px] text-slate-500" title="Gestor Substituto">GS: {row.gestor_sub}</div>}
                                         <div className="font-bold text-slate-700 mt-1" title="Fiscal Titular">FT: {row.fiscal}</div>
                                         {row.fiscal_sub !== 'N/I' && <div className="text-[9px] text-slate-500" title="Fiscal Substituto">FS: {row.fiscal_sub}</div>}
-                                    </td>
-                                    <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_inic || "-"}</td>
-                                    <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_fim || "-"}</td>
-                                    <td className="p-3 align-middle">{row.perc_tempo !== null ? (<div className="flex items-center gap-1"><div className="w-full bg-slate-200 rounded-full h-1.5 flex-1 overflow-hidden"><div className={`h-1.5 rounded-full ${row.perc_tempo >= 1 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(Math.max(row.perc_tempo * 100, 0), 100)}%` }}></div></div><span className="text-[8px] font-bold text-slate-600 min-w-[30px] text-right">{formatPercentBR(row.perc_tempo)}</span></div>) : "-"}</td>
-                                    <td className="p-3 text-center font-bold text-slate-600">{row.dias_passaram !== null ? `${row.dias_passaram} d` : "-"}</td>
-                                    <td className={`p-3 text-center font-bold ${row.encerrando_dias < 0 ? 'text-red-500' : 'text-emerald-600'}`}>{row.encerrando_dias !== null ? `${row.encerrando_dias} d` : "-"}</td>
-                                    <td className={`p-3 text-right font-bold ${row.dif_global < 0 ? 'text-red-500' : (row.dif_global > 0 ? 'text-emerald-600' : 'text-slate-500')} bg-slate-50/30`}>
-                                        {formatBRL(row.dif_global)}
-                                    </td>
-                                    <td className="p-3 text-right font-bold text-slate-700 bg-slate-50/30">
-                                        {formatBRL(row.v_global)}
-                                    </td>
-                                    <td className="p-3 text-right font-bold text-blue-700">{formatBRL(row.v_empenhado)}</td>
-                                    
-                                    <td className="p-3 text-right font-bold text-amber-600">{formatBRL(row.v_liquidado)}</td>
-                                    <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_liquidado)}</td>
-                                    
-                                    <td className="p-3 text-right font-bold text-amber-500">{formatBRL(row.v_a_liquidar)}</td>
-                                    <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_a_liquidar)}</td>
-
-                                    <td className="p-3 text-right font-black text-emerald-600">{formatBRL(row.v_pago)}</td>
-                                    <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_pago)}</td>
-                                    
-                                    <td className="p-3 text-right font-bold text-emerald-500">{formatBRL(row.v_a_pagar)}</td>
-                                    <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_a_pagar)}</td>
-
-                                    <td className="p-3 text-right font-bold text-rose-600">{formatBRL(row.v_bloqueado)}</td>
-                                    <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_bloqueado)}</td>
-                                    <td className="p-3 text-right font-bold text-red-600">{formatBRL(row.v_cancelado)}</td>
-                                    <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_cancelado)}</td>
-                                    <td className="p-3 text-right font-black text-blue-600">{formatBRL(row.v_executado)}</td>
-                                    <td className="p-3 text-center font-black text-blue-800 bg-slate-50/50">{formatPercentBR(row.p_executado)}</td>
-                                    <td className="p-3 text-right font-black text-violet-600">{formatBRL(row.v_pago)}</td>
-                                    <td className="p-3 text-center font-black text-violet-800 bg-violet-50/30">{formatPercentBR(row.p_pago)}</td>
+                                    </td>}
+                                    {masterVisibleCols.dataInic && <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_inic || "-"}</td>}
+                                    {masterVisibleCols.dataFim && <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_fim || "-"}</td>}
+                                    {masterVisibleCols.percTempo && <td className="p-3 align-middle">{row.perc_tempo !== null ? (<div className="flex items-center gap-1"><div className="w-full bg-slate-200 rounded-full h-1.5 flex-1 overflow-hidden"><div className={`h-1.5 rounded-full ${row.perc_tempo >= 1 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(Math.max(row.perc_tempo * 100, 0), 100)}%` }}></div></div><span className="text-[8px] font-bold text-slate-600 min-w-[30px] text-right">{formatPercentBR(row.perc_tempo)}</span></div>) : "-"}</td>}
+                                    {masterVisibleCols.diasPassaram && <td className="p-3 text-center font-bold text-slate-600">{row.dias_passaram !== null ? `${row.dias_passaram} d` : "-"}</td>}
+                                    {masterVisibleCols.encerrandoDias && <td className={`p-3 text-center font-bold ${row.encerrando_dias < 0 ? 'text-red-500' : 'text-emerald-600'}`}>{row.encerrando_dias !== null ? `${row.encerrando_dias} d` : "-"}</td>}
+                                    {masterVisibleCols.difGlobal && <td className={`p-3 text-right font-bold ${row.dif_global < 0 ? 'text-red-500' : (row.dif_global > 0 ? 'text-emerald-600' : 'text-slate-500')} bg-slate-50/30`}>{formatBRL(row.dif_global)}</td>}
+                                    {masterVisibleCols.vGlobal && <td className="p-3 text-right font-bold text-slate-700 bg-slate-50/30">{formatBRL(row.v_global)}</td>}
+                                    {masterVisibleCols.empenhado && <td className="p-3 text-right font-bold text-blue-700">{formatBRL(row.v_empenhado)}</td>}
+                                    {masterVisibleCols.liquidado && <td className="p-3 text-right font-bold text-amber-600">{formatBRL(row.v_liquidado)}</td>}
+                                    {masterVisibleCols.pLiquidado && <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_liquidado)}</td>}
+                                    {masterVisibleCols.aLiquidar && <td className="p-3 text-right font-bold text-amber-500">{formatBRL(row.v_a_liquidar)}</td>}
+                                    {masterVisibleCols.pALiquidar && <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_a_liquidar)}</td>}
+                                    {masterVisibleCols.pago && <td className="p-3 text-right font-black text-emerald-600">{formatBRL(row.v_pago)}</td>}
+                                    {masterVisibleCols.pPago && <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_pago)}</td>}
+                                    {masterVisibleCols.aPagar && <td className="p-3 text-right font-bold text-emerald-500">{formatBRL(row.v_a_pagar)}</td>}
+                                    {masterVisibleCols.pAPagar && <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_a_pagar)}</td>}
+                                    {masterVisibleCols.bloqueado && <td className="p-3 text-right font-bold text-rose-600">{formatBRL(row.v_bloqueado)}</td>}
+                                    {masterVisibleCols.pBloqueado && <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_bloqueado)}</td>}
+                                    {masterVisibleCols.cancelado && <td className="p-3 text-right font-bold text-red-600">{formatBRL(row.v_cancelado)}</td>}
+                                    {masterVisibleCols.pCancelado && <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_cancelado)}</td>}
+                                    {masterVisibleCols.executado && <td className="p-3 text-right font-black text-blue-600">{formatBRL(row.v_executado)}</td>}
+                                    {masterVisibleCols.pExecutado && <td className="p-3 text-center font-black text-blue-800 bg-slate-50/50">{formatPercentBR(row.p_executado)}</td>}
+                                    {masterVisibleCols.execLiq && <td className="p-3 text-right font-black text-violet-600">{formatBRL(row.v_pago)}</td>}
+                                    {masterVisibleCols.pExecLiq && <td className="p-3 text-center font-black text-violet-800 bg-violet-50/30">{formatPercentBR(row.p_pago)}</td>}
                                 </tr>
                             ))}
                         </tbody>
                         <tfoot className="bg-slate-200 sticky bottom-0 border-t-2 border-slate-400 shadow-md z-10">
                             <tr className="text-slate-800 uppercase font-black">
-                                <td colSpan="12" className="p-3 text-right">TOTAIS (Filtro Atual):</td>
-                                <td className="p-3 text-right text-blue-800">{formatBRL(totalsMaster.emp)}</td>
-                                <td className="p-3 text-right text-amber-800">{formatBRL(totalsMaster.liq)}</td>
-                                <td className="p-3 text-center">-</td>
-                                <td className="p-3 text-right text-amber-600">{formatBRL(totalsMaster.a_liq)}</td>
-                                <td className="p-3 text-center">-</td>
-                                <td className="p-3 text-right text-emerald-800">{formatBRL(totalsMaster.pag)}</td>
-                                <td className="p-3 text-center">-</td>
-                                <td className="p-3 text-right text-emerald-600">{formatBRL(totalsMaster.a_pag)}</td>
-                                <td className="p-3 text-center">-</td>
-                                <td className="p-3 text-right text-orange-800">{formatBRL(totalsMaster.blo)}</td>
-                                <td className="p-3 text-center">-</td>
-                                <td className="p-3 text-right text-red-800">{formatBRL(totalsMaster.can)}</td>
-                                <td className="p-3 text-center">-</td>
-                                <td className="p-3 text-right text-blue-800">{formatBRL(totalsMaster.exe)}</td>
-                                <td className="p-3 text-center">-</td>
-                                <td className="p-3 text-right text-violet-800">{formatBRL(totalsMaster.pag)}</td>
-                                <td className="p-3 text-center">-</td>
+                                {masterNonMetricColCount > 0 && <td colSpan={masterNonMetricColCount} className="p-3 text-right">TOTAIS (Filtro Atual):</td>}
+                                {masterVisibleCols.difGlobal && <td className="p-3 text-right text-slate-700">{formatBRL(totalsMaster.dif)}</td>}
+                                {masterVisibleCols.vGlobal && <td className="p-3 text-right text-slate-700">{formatBRL(totalsMaster.global)}</td>}
+                                {masterVisibleCols.empenhado && <td className="p-3 text-right text-blue-800">{formatBRL(totalsMaster.emp)}</td>}
+                                {masterVisibleCols.liquidado && <td className="p-3 text-right text-amber-800">{formatBRL(totalsMaster.liq)}</td>}
+                                {masterVisibleCols.pLiquidado && <td className="p-3 text-center">-</td>}
+                                {masterVisibleCols.aLiquidar && <td className="p-3 text-right text-amber-600">{formatBRL(totalsMaster.a_liq)}</td>}
+                                {masterVisibleCols.pALiquidar && <td className="p-3 text-center">-</td>}
+                                {masterVisibleCols.pago && <td className="p-3 text-right text-emerald-800">{formatBRL(totalsMaster.pag)}</td>}
+                                {masterVisibleCols.pPago && <td className="p-3 text-center">-</td>}
+                                {masterVisibleCols.aPagar && <td className="p-3 text-right text-emerald-600">{formatBRL(totalsMaster.a_pag)}</td>}
+                                {masterVisibleCols.pAPagar && <td className="p-3 text-center">-</td>}
+                                {masterVisibleCols.bloqueado && <td className="p-3 text-right text-orange-800">{formatBRL(totalsMaster.blo)}</td>}
+                                {masterVisibleCols.pBloqueado && <td className="p-3 text-center">-</td>}
+                                {masterVisibleCols.cancelado && <td className="p-3 text-right text-red-800">{formatBRL(totalsMaster.can)}</td>}
+                                {masterVisibleCols.pCancelado && <td className="p-3 text-center">-</td>}
+                                {masterVisibleCols.executado && <td className="p-3 text-right text-blue-800">{formatBRL(totalsMaster.exe)}</td>}
+                                {masterVisibleCols.pExecutado && <td className="p-3 text-center">-</td>}
+                                {masterVisibleCols.execLiq && <td className="p-3 text-right text-violet-800">{formatBRL(totalsMaster.pag)}</td>}
+                                {masterVisibleCols.pExecLiq && <td className="p-3 text-center">-</td>}
                             </tr>
                         </tfoot>
                     </table>
