@@ -190,11 +190,7 @@ const normalizeStr = (str) => {
     return str.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9%]/g, '');
 };
 
-const SPREADSHEET_ID = "1Fuhb3HMRzg2kEozkuREFNKYSXtqUCLhZWFFuWM-f3v4"; 
-const BINARY_API_KEY = "01000001 01001001 01111010 01100001 01010011 01111001 01000011 01001011 01110010 01110110 01100001 01101011 01101011 01000010 01001000 00111001 01101100 00110100 01010111 01100010 01010001 01001011 01001110 01110111 01101010 01010000 00110010 01010011 01010000 01001101 01001001 01101110 01110011 01101110 01110100 01000001 01101010 01100011 01000001"; 
-const API_KEY = decodeBinary(BINARY_API_KEY);
-const RANGE = "CONTROLE_EXEC_CONTR!A1:BR2000"; 
-const API_URL = "https://sheets.googleapis.com/v4/spreadsheets/" + SPREADSHEET_ID + "/values/" + RANGE + "?key=" + API_KEY;
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwwqirbdPVTmqm9KHHYsnr0zsW9DHmnLaQfVMpJtN6xwwAWg7yNv4_Bcu_1cLlcBaqR/exec";
 
 const parseValue = (val) => {
     if (typeof val === 'number') return val;
@@ -867,10 +863,36 @@ function DateInput({ label, value, onChange }) {
     );
 }
 
+function CollapsibleSection({ title, children, defaultOpen = false, globalTrigger, globalState }) {
+    const [isOpen, setIsOpen] = useState(defaultOpen);
+    useEffect(() => { if (globalTrigger > 0) setIsOpen(globalState); }, [globalTrigger, globalState]);
+    return (
+        <div className="max-w-[1600px] mx-auto mb-8">
+            <div className="bg-slate-800 text-white px-6 py-4 rounded-xl cursor-pointer flex justify-between items-center shadow-lg hover:bg-slate-700 transition border border-slate-700" onClick={() => setIsOpen(!isOpen)}>
+                <h2 className="text-sm font-black tracking-widest uppercase flex items-center gap-2"><span className="w-2 h-2 bg-blue-500 rounded-full"></span>{title}</h2>
+                <span className="font-bold text-lg text-slate-300">{isOpen ? '▼' : '►'}</span>
+            </div>
+            {isOpen && <div className="mt-6">{children}</div>}
+        </div>
+    );
+}
+
 function Dashboard() {
     const [rawData, setRawData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [status, setStatus] = useState("A verificar sessão local...");
+    const currentUser = sessionStorage.getItem('user_PainelGeral') || 'Usuário';
+    const currentPerfil = sessionStorage.getItem('perfil_PainelGeral') || '';
+
+    // Estado de Expansão Global das seções
+    const [globalExpandState, setGlobalExpandState] = useState(false);
+    const [expandTrigger, setExpandTrigger] = useState(0);
+
+    const toggleAllSections = () => {
+        const next = !globalExpandState;
+        setGlobalExpandState(next);
+        setExpandTrigger(prev => prev + 1);
+    };
     
     const [sortConfig, setSortConfig] = useState({ key: 'v_empenhado', direction: 'desc' });
     const [top20Sort, setTop20Sort] = useState('valor_desc');
@@ -889,7 +911,7 @@ function Dashboard() {
     const [fGestor, setFGestor] = useState([]);
     const [fFiscalSub, setFFiscalSub] = useState([]);
     const [fGestorSub, setFGestorSub] = useState([]);
-    const [fSecLog, setFSecLog] = useState([]);
+    const [fSecLog, setFSecLog] = useState(["SGLS-CLASSE I", "SGLFE-CLASSE II", "SGLC-CLASSE III", "SGLME-CLASSE V (MUN)"]);
     const [fContrato, setFContrato] = useState([]);
     const [fCompra, setFCompra] = useState([]); 
     const [fModalidade, setFModalidade] = useState([]);
@@ -897,7 +919,10 @@ function Dashboard() {
     
     const [dInicDe, setDInicDe] = useState("");
     const [dInicAte, setDInicAte] = useState("");
-    const [dFimDe, setDFimDe] = useState("");
+    const [dFimDe, setDFimDe] = useState(() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    });
     const [dFimAte, setDFimAte] = useState("");
 
     const [searchContrato, setSearchContrato] = useState("");
@@ -943,16 +968,34 @@ function Dashboard() {
         setNumFilters(initialNumFilters); setDateFilters(initialDateFilters);
     };
 
-    const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+    const getOffsetDateStr = (offsetDays) => {
+        const d = new Date();
+        d.setDate(d.getDate() + offsetDays);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    const todayStr = getOffsetDateStr(0);
+    const sevenDaysAgoStr = getOffsetDateStr(-7);
+    const thirtyDaysAgoStr = getOffsetDateStr(-30);
     const isHojeActive = dFimDe === todayStr;
+    const isSevenActive = dFimDe === sevenDaysAgoStr;
+    const isThirtyActive = dFimDe === thirtyDaysAgoStr;
     const toggleHoje = () => { if (isHojeActive) setDFimDe(""); else setDFimDe(todayStr); };
+    const toggleSevenDays = () => { if (isSevenActive) setDFimDe(""); else setDFimDe(sevenDaysAgoStr); };
+    const toggleThirtyDays = () => { if (isThirtyActive) setDFimDe(""); else setDFimDe(thirtyDaysAgoStr); };
 
     const cSupItems = ["SGLS-CLASSE I", "SGLFE-CLASSE II", "SGLC-CLASSE III", "SGLME-CLASSE V (MUN)"];
     const isCSupActive = fSecLog.length === 4 && cSupItems.every(i => fSecLog.includes(i));
     const toggleCSup = () => { if (isCSupActive) setFSecLog([]); else setFSecLog(cSupItems); };
 
     const logout = () => {
-        try { localStorage.removeItem('isAuth_PainelGeral'); localStorage.removeItem('dashData_PainelGeral'); } catch(e) {}
+        try {
+            sessionStorage.removeItem('token_PainelGeral');
+            sessionStorage.removeItem('user_PainelGeral');
+            sessionStorage.removeItem('perfil_PainelGeral');
+            sessionStorage.removeItem('ativo_PainelGeral');
+            sessionStorage.removeItem('validade_PainelGeral');
+            localStorage.removeItem('dashData_PainelGeral');
+        } catch(e) {}
         window.location.reload();
     };
 
@@ -1108,19 +1151,25 @@ function Dashboard() {
         if (!forceSync) {
             try {
                 const cachedData = localStorage.getItem('dashData_PainelGeral');
-                if (cachedData) { setRawData(JSON.parse(cachedData)); setStatus("Online - Dados da Sessão (Use SINCRONIZAR para atualizar)"); setLoading(false); return; }
+                if (cachedData) { setRawData(JSON.parse(cachedData)); setStatus("Online - Dados carregados via Apps Script"); setLoading(false); return; }
             } catch(e) {}
         }
         try {
-            setStatus("A transferir dados via API Google...");
-            const response = await fetch(API_URL);
-            if (!response.ok) throw new Error("Falha na API Google.");
+            setStatus("A transferir dados via Apps Script...");
+            const token = sessionStorage.getItem('token_PainelGeral');
+            if (!token) throw new Error("Token de acesso não encontrado. Faça login novamente.");
+            const response = await fetch(`${APPS_SCRIPT_URL}?acao=dados&token=${encodeURIComponent(token)}`);
+            if (!response.ok) throw new Error("Falha na comunicação com o Apps Script.");
             const json = await response.json();
-            if (!json.values) throw new Error("Aba retornou vazia.");
-            processData(json.values, false);
-            setStatus("Online - Conectado via API");
+            if (!json.ok) throw new Error(json.mensagem || "Falha ao obter dados pelo Apps Script.");
+            const rows = json.geral || json.values;
+            if (!rows || rows.length < 2) throw new Error("Apps Script não retornou dados da planilha geral.");
+            processData(rows, false);
+            const extra = json.acesso && json.acesso.limitado ? ` | Acessos restantes: ${json.acesso.restantes}` : '';
+            setStatus("Online - Dados carregados via Apps Script");
         } catch (error) { 
-            setStatus("Falha de Acesso à API. Utilize Carga Manual."); setLoading(false); 
+            console.error(error);
+            setStatus(error.message || "Falha de Acesso à API. Utilize Carga Manual."); setLoading(false); 
         }
     };
 
@@ -1429,22 +1478,32 @@ function Dashboard() {
             <header className="max-w-[1600px] mx-auto mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-black uppercase tracking-tighter text-slate-800">PAINEL GERAL DE CONTRATOS</h1>
-                    <p className={`text-[11px] font-bold mt-1 ${status.includes("Erro") || status.includes("falhou") ? "text-red-600" : "text-emerald-600"}`}>● {status}</p>
+                    <p className={`text-[11px] font-bold mt-1 ${status.includes("Erro") || status.includes("falhou") || status.includes("Falha") ? "text-red-600" : "text-emerald-600"}`}>● {status}</p>
                     <p className="text-[11px] italic text-blue-600 mt-0.5">Produzido por Cel Brito.</p>
                 </div>
-                <div className="flex gap-2 items-center bg-white px-4 py-2 rounded-lg border shadow-sm">
-                    <span className="text-[10px] font-black text-slate-400 uppercase">Carga Manual:</span>
-                    <input type="file" accept=".csv" onChange={(e) => { const r = new FileReader(); r.onload = (ev) => loadData(false, ev.target.result); r.readAsText(e.target.files[0]); }} className="text-[9px] cursor-pointer text-blue-600 font-bold w-[160px]" />
-                    <div className="w-[1px] h-6 bg-slate-300 mx-1"></div>
-                    <button onClick={() => loadData(true, null)} className="text-[10px] font-black text-white bg-blue-600 px-3 py-2 rounded shadow hover:bg-blue-700 transition">SINCRONIZAR API</button>
-                    <button onClick={logout} className="text-[10px] font-black text-white bg-red-600 px-3 py-2 rounded shadow hover:bg-red-700 transition">SAIR</button>
+                <div className="flex flex-nowrap gap-3 items-center bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm overflow-x-auto max-w-full">
+                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-tight whitespace-nowrap">CARGA MANUAL:</span>
+                    <input type="file" accept=".csv" onChange={(e) => { const r = new FileReader(); r.onload = (ev) => loadData(false, ev.target.result); r.readAsText(e.target.files[0]); }} className="text-[10px] cursor-pointer text-blue-600 font-bold w-[190px] shrink-0" />
+                    <div className="w-[1px] h-8 bg-slate-300 mx-1 hidden md:block shrink-0"></div>
+                    <button onClick={() => loadData(true, null)} className="text-[11px] font-black text-white bg-blue-600 px-4 py-3 rounded-lg shadow hover:bg-blue-700 transition uppercase tracking-wider whitespace-nowrap shrink-0">SINCRONIZAR APIs</button>
+                    <span className="text-[11px] font-black text-slate-500 uppercase whitespace-nowrap ml-1 shrink-0">
+                        LOGADO COMO: <span className="text-blue-600">{String(currentUser || 'Usuário').toUpperCase()}</span>{currentPerfil && <span className="text-slate-400"> ({String(currentPerfil).toUpperCase()})</span>}
+                    </span>
+                    <button onClick={logout} className="text-[11px] font-black text-white bg-red-600 px-4 py-3 rounded-lg shadow hover:bg-red-700 transition uppercase tracking-wider whitespace-nowrap shrink-0">SAIR</button>
                 </div>
             </header>
 
             <div className="max-w-[1600px] mx-auto mb-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
                 <h2 className="text-xs font-black uppercase tracking-widest text-[#99bbd4] mb-4">Filtros Dinâmicos</h2>
                 <div className="mb-4 pb-4 border-b border-slate-100 flex flex-col gap-3">
-                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações Rápidas:</span>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações Rápidas (Tempo e Status):</span>
+                    <div className="flex flex-wrap gap-2 items-center">
+                        <button onClick={toggleCSup} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isCSupActive ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>C SUP</button>
+                        <button onClick={toggleHoje} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isHojeActive ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTRATOS VIGENTES</button>
+                        <button onClick={toggleSevenDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isSevenActive ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR 7 DIAS ATRÁS</button>
+                        <button onClick={toggleThirtyDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isThirtyActive ? 'bg-orange-600 text-white border-orange-600 ring-2 ring-orange-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR 30 DIAS ATRÁS</button>
+                        <button onClick={clearAllFilters} className="text-[9px] font-bold uppercase bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700 transition shadow-md border border-slate-800">Limpar Filtros</button>
+                    </div>
                     <div className="flex flex-wrap gap-2 items-center">
                         {Object.entries(tagColorsMap).map(([label, config]) => {
                             const isActive = fSituacaoTags.includes(label);
@@ -1455,10 +1514,6 @@ function Dashboard() {
                                 </button>
                             );
                         })}
-                        <div className="w-px h-6 bg-slate-200 mx-2 hidden sm:block"></div>
-                        <button onClick={toggleCSup} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isCSupActive ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>C SUP</button>
-                        <button onClick={toggleHoje} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isHojeActive ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>A Partir de Hoje</button>
-                        <button onClick={clearAllFilters} className="text-[9px] font-bold uppercase bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700 transition shadow-md border border-slate-800">Limpar Filtros</button>
                     </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
@@ -1480,6 +1535,13 @@ function Dashboard() {
                 </div>
             </div>
 
+            <div className="max-w-[1600px] mx-auto flex justify-end mb-3">
+                <button onClick={toggleAllSections} className="text-[11px] font-black text-white bg-slate-800 px-5 py-3 rounded-xl shadow-lg hover:bg-slate-700 transition uppercase tracking-wider">
+                    {globalExpandState ? '▼ RECOLHER TODAS AS SEÇÕES' : '► EXPANDIR TODAS AS SEÇÕES'}
+                </button>
+            </div>
+
+            <CollapsibleSection title="INDICADORES DE DESEMPENHO (KPIs)" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 mb-4">
                 <KPICard title="QTD Contratos" value={kpis.qtdContratos} color="slate" isCurrency={false} />
                 <KPICard title="QTD Ativos" value={kpis.qtdAtivos} extraText={`Inexec: ${kpis.qtdAtivosInexec}\nEm Exec: ${kpis.qtdAtivosEmExec}\nExec Tot: ${kpis.qtdAtivosExecTot}\nExec Parc: ${kpis.qtdAtivosExecParc}`} color="blue" isCurrency={false} />
@@ -1499,7 +1561,9 @@ function Dashboard() {
                 <KPICard title="Executado" value={kpis.exe} subValue={kpis.pExe} color="blue" isCurrency={true} />
                 <KPICard title="Executado Líquido" value={kpis.pag} subValue={kpis.pPag} color="violet" isCurrency={true} />
             </div>
+            </CollapsibleSection>
 
+            <CollapsibleSection title="ESTATÍSTICAS" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e QTD por Gestor</h3>
@@ -1551,6 +1615,9 @@ function Dashboard() {
                 <ToggleableChartCard id="pSitQ" title="QTD Contratos (Situação)" data={situacaoData} isFinancial={false} />
             </div>
 
+            </CollapsibleSection>
+
+            <CollapsibleSection title="GRÁFICOS DE EXECUÇÃO" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
             {/* TOP 20: EXECUÇÃO ORÇAMENTÁRIA */}
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -1877,6 +1944,9 @@ function Dashboard() {
                 </div>
             </div>
 
+            </CollapsibleSection>
+
+            <CollapsibleSection title="TABELAS DE EXECUÇÃO" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden mb-10">
                 <div className="bg-slate-800 px-4 py-3 flex justify-between items-center flex-wrap gap-2">
                     <h3 className="text-white text-xs font-black tracking-widest uppercase">
@@ -2006,6 +2076,7 @@ function Dashboard() {
                     </table>
                 </div>
             </div>
+            </CollapsibleSection>
         </div>
     );
 }
@@ -2018,7 +2089,7 @@ class ErrorBoundary extends React.Component {
             <div className="min-h-screen flex flex-col items-center justify-center bg-red-50 p-8">
                 <h2 className="text-2xl font-black text-red-600 mb-4 uppercase">Erro Detetado no Painel</h2>
                 <p className="text-slate-700 mb-6 font-bold">{this.state.error.toString()}</p>
-                <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded shadow font-bold hover:bg-red-700">Limpar Cache e Recarregar</button>
+                <button onClick={() => { sessionStorage.clear(); localStorage.removeItem('dashData_PainelGeral'); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded shadow font-bold hover:bg-red-700">Limpar Sessão e Recarregar</button>
             </div>
         );
         return this.props.children; 
@@ -2027,34 +2098,47 @@ class ErrorBoundary extends React.Component {
 
 function App() {
     const [isAuthenticated, setIsAuthenticated] = useState(() => {
-        try { return localStorage.getItem('isAuth_PainelGeral') === 'true'; } 
+        try { return !!sessionStorage.getItem('token_PainelGeral'); } 
         catch(e) { return false; }
     });
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
+    const [isLogging, setIsLogging] = useState(false);
 
-    const handleLogin = (e) => {
+    const handleLogin = async (e) => {
         e.preventDefault();
-        const usersBinary = {
-            '01100010 01110010 01101001 01110100 01101111': '00110001 00110110 00110110 00111001', 
-            '01100111 01100101 01110011 01110100 01101111 01110010': '00110000 00110001 00110000 00110001', 
-            '01100110 01101001 01110011 01100011 01100001 01101100': '00110000 00110010 00110000 00110010', 
-            '01100001 01101100 01101101 01100101 01110010 01101001 01100001': '00110010 00110000 00110000 00110010', 
-            '01100010 01101111 01110101 01101100 01100101 01110111 01100001 01110010 01100100': '00110000 00110001 00110011 00110110' 
-        };
-        const users = {};
-        Object.keys(usersBinary).forEach(binUser => { users[decodeBinary(binUser)] = decodeBinary(usersBinary[binUser]); });
+        setError("");
+        setIsLogging(true);
 
-        const inputUser = username.toLowerCase().trim();
-        const inputPass = password.trim();
+        try {
+            const body = new URLSearchParams();
+            body.append("acao", "login");
+            body.append("usuario", username);
+            body.append("senha", password);
 
-        if (users[inputUser] && users[inputUser] === inputPass) {
+            const resp = await fetch(APPS_SCRIPT_URL, { method: "POST", body });
+            const json = await resp.json();
+
+            if (!json.ok) {
+                setError(json.mensagem || "Credenciais inválidas.");
+                setIsLogging(false);
+                return;
+            }
+
+            sessionStorage.setItem('token_PainelGeral', json.token);
+            sessionStorage.setItem('user_PainelGeral', json.usuario?.nome || username);
+            sessionStorage.setItem('perfil_PainelGeral', json.usuario?.perfil || '');
+            sessionStorage.setItem('ativo_PainelGeral', json.usuario?.ativo || '');
+            sessionStorage.setItem('validade_PainelGeral', json.usuario?.validade || '');
+            try { localStorage.removeItem('dashData_PainelGeral'); } catch(e) {}
+
             setIsAuthenticated(true);
-            try { localStorage.setItem('isAuth_PainelGeral', 'true'); } catch(e) {}
-            setError("");
-        } else {
-            setError("Credenciais inválidas. Verifique o usuário e a senha.");
+            setIsLogging(false);
+        } catch (erro) {
+            console.error(erro);
+            setError("Falha ao tentar fazer login pelo Apps Script.");
+            setIsLogging(false);
         }
     };
 
@@ -2070,14 +2154,16 @@ function App() {
                     <form onSubmit={handleLogin} className="space-y-5">
                         <div>
                             <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Usuário</label>
-                            <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full border border-slate-300 px-3 py-3 rounded text-sm font-bold text-slate-700 outline-none focus:border-blue-500 bg-slate-50" placeholder="Digite o usuário..." />
+                            <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full border border-slate-300 px-3 py-3 rounded text-sm font-bold text-slate-700 outline-none focus:border-blue-500 bg-slate-50" placeholder="Digite o usuário..." autoComplete="username" />
                         </div>
                         <div>
                             <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Senha</label>
-                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full border border-slate-300 px-3 py-3 rounded text-sm font-bold text-slate-700 outline-none focus:border-blue-500 bg-slate-50" placeholder="••••••••" />
+                            <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full border border-slate-300 px-3 py-3 rounded text-sm font-bold text-slate-700 outline-none focus:border-blue-500 bg-slate-50" placeholder="••••••••" autoComplete="current-password" />
                         </div>
                         {error && (<div className="bg-red-50 border-l-4 border-red-500 p-3 rounded"><p className="text-[11px] font-bold text-red-600 text-center">{error}</p></div>)}
-                        <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-black uppercase text-[11px] tracking-widest py-4 rounded transition-colors shadow-lg mt-2">Autenticar Acesso</button>
+                        <button type="submit" disabled={isLogging} className={`w-full text-white font-black uppercase text-[11px] tracking-widest py-4 rounded transition-colors shadow-lg mt-2 ${isLogging ? 'bg-slate-400 cursor-wait' : 'bg-slate-800 hover:bg-slate-900'}`}>
+                            {isLogging ? 'Autenticando...' : 'Autenticar Acesso'}
+                        </button>
                     </form>
                 </div>
             </div>
