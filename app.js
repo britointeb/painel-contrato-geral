@@ -994,12 +994,33 @@ function Dashboard() {
     const todayStr = getOffsetDateStr(0);
     const sevenDaysAgoStr = getOffsetDateStr(-7);
     const thirtyDaysAgoStr = getOffsetDateStr(-30);
-    const isHojeActive = dFimDe === todayStr;
-    const isSevenActive = dFimDe === sevenDaysAgoStr;
-    const isThirtyActive = dFimDe === thirtyDaysAgoStr;
-    const toggleHoje = () => { if (isHojeActive) setDFimDe(""); else setDFimDe(todayStr); };
-    const toggleSevenDays = () => { if (isSevenActive) setDFimDe(""); else setDFimDe(sevenDaysAgoStr); };
-    const toggleThirtyDays = () => { if (isThirtyActive) setDFimDe(""); else setDFimDe(thirtyDaysAgoStr); };
+    const sevenDaysAheadStr = getOffsetDateStr(7);
+    const thirtyDaysAheadStr = getOffsetDateStr(30);
+    const isHojeActive = dFimDe === todayStr && !dFimAte;
+    const isVencendo7Active = dFimDe === todayStr && dFimAte === sevenDaysAheadStr;
+    const isVencendo30Active = dFimDe === todayStr && dFimAte === thirtyDaysAheadStr;
+    const isSevenActive = dFimDe === sevenDaysAgoStr && !dFimAte;
+    const isThirtyActive = dFimDe === thirtyDaysAgoStr && !dFimAte;
+    const toggleHoje = () => {
+        if (isHojeActive) { setDFimDe(""); setDFimAte(""); }
+        else { setDFimDe(todayStr); setDFimAte(""); }
+    };
+    const toggleVencendo7 = () => {
+        if (isVencendo7Active) { setDFimDe(""); setDFimAte(""); }
+        else { setDFimDe(todayStr); setDFimAte(sevenDaysAheadStr); }
+    };
+    const toggleVencendo30 = () => {
+        if (isVencendo30Active) { setDFimDe(""); setDFimAte(""); }
+        else { setDFimDe(todayStr); setDFimAte(thirtyDaysAheadStr); }
+    };
+    const toggleSevenDays = () => {
+        if (isSevenActive) { setDFimDe(""); setDFimAte(""); }
+        else { setDFimDe(sevenDaysAgoStr); setDFimAte(""); }
+    };
+    const toggleThirtyDays = () => {
+        if (isThirtyActive) { setDFimDe(""); setDFimAte(""); }
+        else { setDFimDe(thirtyDaysAgoStr); setDFimAte(""); }
+    };
 
     const cSupItems = ["SGLS-CLASSE I", "SGLFE-CLASSE II", "SGLC-CLASSE III", "SGLME-CLASSE V (MUN)"];
     const isCSupActive = fSecLog.length === 4 && cSupItems.every(i => fSecLog.includes(i));
@@ -1287,11 +1308,23 @@ function Dashboard() {
             }
         });
 
+        const validName = (v) => v && v !== '-' && v !== 'N/I';
+        const gestoresTitulares = new Set(filteredData.map(d => d.gestor).filter(validName));
+        const gestoresSubstitutos = new Set(filteredData.map(d => d.gestor_sub).filter(validName));
+        const gestoresTodos = new Set([...gestoresTitulares, ...gestoresSubstitutos]);
+        const fiscaisTitulares = new Set(filteredData.map(d => d.fiscal).filter(validName));
+        const fiscaisSubstitutos = new Set(filteredData.map(d => d.fiscal_sub).filter(validName));
+        const fiscaisTodos = new Set([...fiscaisTitulares, ...fiscaisSubstitutos]);
+
         return {
             qtdContratos: processedContracts.size,
-            qtdGestores: new Set(filteredData.map(d => d.gestor)).size,
-            qtdFiscais: new Set(filteredData.map(d => d.fiscal)).size,
-            qtdFornecedores: new Set(filteredData.map(d => d.fornecedor)).size,
+            qtdGestores: gestoresTodos.size,
+            qtdGestoresTit: gestoresTitulares.size,
+            qtdGestoresSub: gestoresSubstitutos.size,
+            qtdFiscais: fiscaisTodos.size,
+            qtdFiscaisTit: fiscaisTitulares.size,
+            qtdFiscaisSub: fiscaisSubstitutos.size,
+            qtdFornecedores: new Set(filteredData.map(d => d.fornecedor).filter(validName)).size,
             qtdAtivos, qtdAtivosInexec, qtdAtivosEmExec, qtdAtivosExecTot, qtdAtivosExecParc,
             qtdVencidos, qtdVencInexecTot, qtdVencidosTot, qtdVencidosParc, qtdBloqueados, qtdCancelados,
             emp, liq, pag, blo, can, exe,
@@ -1581,6 +1614,8 @@ function Dashboard() {
                     <div className="flex flex-wrap gap-2 items-center">
                         <button onClick={toggleCSup} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isCSupActive ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>C SUP</button>
                         <button onClick={toggleHoje} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isHojeActive ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTRATOS VIGENTES</button>
+                        <button onClick={toggleVencendo7} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVencendo7Active ? 'bg-lime-600 text-white border-lime-600 ring-2 ring-lime-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VENCENDO EM 7 DIAS</button>
+                        <button onClick={toggleVencendo30} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVencendo30Active ? 'bg-teal-600 text-white border-teal-600 ring-2 ring-teal-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VENCENDO EM 30 DIAS</button>
                         <button onClick={toggleSevenDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isSevenActive ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR 7 DIAS ATRÁS</button>
                         <button onClick={toggleThirtyDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isThirtyActive ? 'bg-orange-600 text-white border-orange-600 ring-2 ring-orange-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR 30 DIAS ATRÁS</button>
                         <button onClick={clearAllFilters} className="text-[9px] font-bold uppercase bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700 transition shadow-md border border-slate-800">Limpar Filtros</button>
@@ -1629,8 +1664,10 @@ function Dashboard() {
                 <KPICard title="QTD Vencidos" value={kpis.qtdVencidos} extraText={`Inexec Tot: ${kpis.qtdVencInexecTot}\nExec Tot: ${kpis.qtdVencidosTot}\nExec Parc: ${kpis.qtdVencidosParc}`} color="slate" isCurrency={false} />
                 <KPICard title="QTD Bloqueados" value={kpis.qtdBloqueados} color="orange" isCurrency={false} />
                 <KPICard title="QTD Cancelados" value={kpis.qtdCancelados} color="red" isCurrency={false} />
-                <KPICard title="QTD Gestores" value={kpis.qtdGestores} color="amber" isCurrency={false} />
-                <KPICard title="QTD Fiscais" value={kpis.qtdFiscais} color="emerald" isCurrency={false} />
+                <KPICard title="QTD Gestores" value={kpis.qtdGestores} extraText={`Titular: ${kpis.qtdGestoresTit}
+Substituto: ${kpis.qtdGestoresSub}`} color="amber" isCurrency={false} />
+                <KPICard title="QTD Fiscais" value={kpis.qtdFiscais} extraText={`Titular: ${kpis.qtdFiscaisTit}
+Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                 <KPICard title="QTD Fornecedores" value={kpis.qtdFornecedores} color="violet" isCurrency={false} />
             </div>
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
