@@ -712,7 +712,7 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
     );
 }
 
-function KPICard({ title, value, subValue, diffValue, diffLabel, extraText, color, isCurrency }) {
+function KPICard({ title, value, subValue, diffValue, diffLabel, extraText, color, isCurrency, subLabel = "do Empenhado" }) {
     const colors = { 
         slate: "border-slate-800 text-slate-800", 
         blue: "border-blue-500 text-blue-700", 
@@ -747,7 +747,7 @@ function KPICard({ title, value, subValue, diffValue, diffLabel, extraText, colo
                     </span>
                 )}
                 {subValue !== undefined && (
-                    <span className="text-[10px] font-bold opacity-70 mt-1">{formatPercentBR(subValue)} do Empenhado</span>
+                    <span className="text-[10px] font-bold opacity-70 mt-1">{formatPercentBR(subValue)} {subLabel}</span>
                 )}
                 {renderExtraText()}
             </div>
@@ -927,13 +927,14 @@ function Dashboard() {
 
     const [searchContrato, setSearchContrato] = useState("");
     const [searchSituacao, setSearchSituacao] = useState("");
+    const [searchSecLog, setSearchSecLog] = useState("");
     const [searchFornecedor, setSearchFornecedor] = useState("");
     const [searchObjeto, setSearchObjeto] = useState("");
     const [searchGestorFiscal, setSearchGestorFiscal] = useState("");
 
     const [showMasterColsMenu, setShowMasterColsMenu] = useState(false);
     const masterColumnLabels = {
-        contrato: "CONTRATO", situacao: "SITUAÇÃO", fornecedor: "FORNECEDOR", objeto: "OBJETO", gestorFiscal: "GESTORES/FISCAIS",
+        contrato: "CONTRATO", situacao: "SITUAÇÃO", secLog: "SEC LOG", fornecedor: "FORNECEDOR", objeto: "OBJETO", gestorFiscal: "GESTORES/FISCAIS",
         dataInic: "INÍCIO", dataFim: "FIM", percTempo: "% TEMPO", diasPassaram: "PASSARAM", encerrandoDias: "FALTAM",
         difGlobal: "GLOBAL-EMP", vGlobal: "GLOBAL", empenhado: "EMPENHADO", liquidado: "LIQUIDADO", pLiquidado: "LIQ %",
         aLiquidar: "A LIQUIDAR", pALiquidar: "A LIQ %", pago: "PAGO", pPago: "PAGO %", aPagar: "A PAGAR", pAPagar: "A PAGAR %",
@@ -941,7 +942,7 @@ function Dashboard() {
         execLiq: "EXEC LIQ", pExecLiq: "EXEC LIQ %"
     };
     const [masterVisibleCols, setMasterVisibleCols] = useState({
-        contrato: true, situacao: true, fornecedor: true, objeto: true, gestorFiscal: true,
+        contrato: true, situacao: true, secLog: true, fornecedor: true, objeto: true, gestorFiscal: true,
         dataInic: true, dataFim: true, percTempo: true, diasPassaram: true, encerrandoDias: true,
         difGlobal: true, vGlobal: true, empenhado: true, liquidado: true, pLiquidado: true,
         aLiquidar: true, pALiquidar: true, pago: true, pPago: true, aPagar: true, pAPagar: true,
@@ -981,7 +982,7 @@ function Dashboard() {
     const clearAllFilters = () => {
         setFFiscal([]); setFGestor([]); setFFiscalSub([]); setFGestorSub([]); setFSecLog([]); setFContrato([]); setFCompra([]); setFModalidade([]); setFFornecedor([]);
         setDInicDe(""); setDInicAte(""); setDFimDe(""); setDFimAte("");
-        setSearchContrato(""); setSearchSituacao(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
+        setSearchContrato(""); setSearchSituacao(""); setSearchSecLog(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
         setFSituacaoTags([]);
         setNumFilters(initialNumFilters); setDateFilters(initialDateFilters);
     };
@@ -1239,6 +1240,7 @@ function Dashboard() {
 
             const sCont = !searchContrato || item.contrato.includes(searchContrato.toUpperCase()) || item.compra.includes(searchContrato.toUpperCase()) || item.modalidade.includes(searchContrato.toUpperCase());
             const sSit = !searchSituacao || item.situacao.includes(searchSituacao.toUpperCase());
+            const sSecLog = !searchSecLog || item.sec_log.includes(searchSecLog.toUpperCase());
             const sForn = !searchFornecedor || item.fornecedor.includes(searchFornecedor.toUpperCase());
             const sObj = !searchObjeto || item.objeto.includes(searchObjeto.toUpperCase());
             const sGest = !searchGestorFiscal || item.gestor.includes(searchGestorFiscal.toUpperCase()) || item.fiscal.includes(searchGestorFiscal.toUpperCase());
@@ -1250,7 +1252,7 @@ function Dashboard() {
                 if (numFilters[key].min !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) < parseFloat(numFilters[key].min)) { mNum = false; break; }
                 if (numFilters[key].max !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) > parseFloat(numFilters[key].max)) { mNum = false; break; }
             }
-            return mFisc && mGest && mFiscSub && mGestSub && mSec && mCont && mForn && mCompra && mMod && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sForn && sObj && sGest && mSitTag && mNum;
+            return mFisc && mGest && mFiscSub && mGestSub && mSec && mCont && mForn && mCompra && mMod && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sSecLog && sForn && sObj && sGest && mSitTag && mNum;
         });
 
         if (sortConfig.key) {
@@ -1267,7 +1269,7 @@ function Dashboard() {
             });
         }
         return filtered;
-    }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
+    }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchSecLog, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
 
     const totalsMaster = useMemo(() => {
         let global = 0, dif = 0, emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
@@ -1280,14 +1282,14 @@ function Dashboard() {
     }, [filteredData]);
 
     const kpis = useMemo(() => {
-        let emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0;
+        let global = 0, emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0;
         const processedContracts = new Set();
         let qtdAtivos = 0, qtdAtivosInexec = 0, qtdAtivosEmExec = 0, qtdAtivosExecTot = 0, qtdAtivosExecParc = 0;
         let qtdVencidos = 0, qtdVencInexecTot = 0, qtdVencidosTot = 0, qtdVencidosParc = 0;
         let qtdBloqueados = 0, qtdCancelados = 0;
 
         filteredData.forEach(r => { 
-            emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; 
+            global += r.v_global; emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; 
             if (!processedContracts.has(r.contrato)) {
                 processedContracts.add(r.contrato);
                 if (r.situacaoFlags.some(f => f.label === 'CAN')) qtdCancelados++;
@@ -1327,7 +1329,8 @@ function Dashboard() {
             qtdFornecedores: new Set(filteredData.map(d => d.fornecedor).filter(validName)).size,
             qtdAtivos, qtdAtivosInexec, qtdAtivosEmExec, qtdAtivosExecTot, qtdAtivosExecParc,
             qtdVencidos, qtdVencInexecTot, qtdVencidosTot, qtdVencidosParc, qtdBloqueados, qtdCancelados,
-            emp, liq, pag, blo, can, exe,
+            global, emp, liq, pag, blo, can, exe,
+            pEmpGlobal: global ? emp / global : 0,
             pLiq: emp ? liq / emp : 0, pPag: emp ? pag / emp : 0, pBlo: emp ? blo / emp : 0, pCan: emp ? can / emp : 0, pExe: emp ? exe / emp : 0
         };
     }, [filteredData]);
@@ -1543,13 +1546,14 @@ function Dashboard() {
     const pQ4 = totalBubbles ? ((q4Otimo / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
 
     const masterNonMetricColCount = [
-        'contrato', 'situacao', 'fornecedor', 'objeto', 'gestorFiscal', 'dataInic', 'dataFim', 'percTempo', 'diasPassaram', 'encerrandoDias'
+        'contrato', 'situacao', 'secLog', 'fornecedor', 'objeto', 'gestorFiscal', 'dataInic', 'dataFim', 'percTempo', 'diasPassaram', 'encerrandoDias'
     ].filter(k => masterVisibleCols[k]).length;
 
     const getMasterExportCols = () => {
         let cols = [];
         if (masterVisibleCols.contrato) cols.push({ header: "CONTRATO", key: "contrato" });
         if (masterVisibleCols.situacao) cols.push({ header: "SITUAÇÃO", key: "situacao" });
+        if (masterVisibleCols.secLog) cols.push({ header: "SEC LOG", key: "sec_log" });
         if (masterVisibleCols.fornecedor) cols.push({ header: "FORNECEDOR", key: "fornecedor" });
         if (masterVisibleCols.objeto) cols.push({ header: "OBJETO", key: "objeto" });
         if (masterVisibleCols.gestorFiscal) cols.push({ header: "GESTOR/FISCAL", key: "gestor", format: (r) => `GT: ${r.gestor} | GS: ${r.gestor_sub} | FT: ${r.fiscal} | FS: ${r.fiscal_sub}` });
@@ -1670,8 +1674,9 @@ Substituto: ${kpis.qtdGestoresSub}`} color="amber" isCurrency={false} />
 Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                 <KPICard title="QTD Fornecedores" value={kpis.qtdFornecedores} color="violet" isCurrency={false} />
             </div>
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4 mb-8">
-                <KPICard title="Empenhado" value={kpis.emp} color="blue" isCurrency={true} />
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-4 mb-8">
+                <KPICard title="Global" value={kpis.global} color="slate" isCurrency={true} />
+                <KPICard title="Empenhado" value={kpis.emp} subValue={kpis.pEmpGlobal} subLabel="do Global" diffLabel="Dif (Glob-Emp)" diffValue={kpis.global - kpis.emp} color="blue" isCurrency={true} />
                 <KPICard title="Liquidado" value={kpis.liq} subValue={kpis.pLiq} diffLabel="Dif (Emp-Liq)" diffValue={kpis.emp - kpis.liq} color="amber" isCurrency={true} />
                 <KPICard title="Pago" value={kpis.pag} subValue={kpis.pPag} diffLabel="Dif (Liq-Pag)" diffValue={kpis.liq - kpis.pag} color="emerald" isCurrency={true} />
                 <KPICard title="Bloqueado" value={kpis.blo} subValue={kpis.pBlo} color="orange" isCurrency={true} />
@@ -2099,6 +2104,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                             <tr className="text-slate-600 uppercase font-black tracking-tighter align-top">
                                 {masterVisibleCols.contrato && <TextHeader widthClass="w-[7%]" label="Contrato" field="contrato" current={sortConfig} onSort={handleSort} searchVal={searchContrato} onSearchChange={setSearchContrato} />}
                                 {masterVisibleCols.situacao && <TextHeader widthClass="w-[6%]" label="Situação" field="situacao" current={sortConfig} onSort={handleSort} searchVal={searchSituacao} onSearchChange={setSearchSituacao} />}
+                                {masterVisibleCols.secLog && <TextHeader widthClass="w-[5%]" label="SEC LOG" field="sec_log" current={sortConfig} onSort={handleSort} searchVal={searchSecLog} onSearchChange={setSearchSecLog} />}
                                 {masterVisibleCols.fornecedor && <TextHeader widthClass="w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />}
                                 {masterVisibleCols.objeto && <TextHeader widthClass="w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />}
                                 {masterVisibleCols.gestorFiscal && <TextHeader widthClass="w-[7%]" label="Gestores/Fiscais" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />}
@@ -2142,6 +2148,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                             ))}
                                         </div>
                                     </td>}
+                                    {masterVisibleCols.secLog && <td className="p-3 text-slate-600 font-black break-words">{row.sec_log}</td>}
                                     {masterVisibleCols.fornecedor && <td className="p-3 text-slate-600 font-bold break-words">{row.fornecedor}</td>}
                                     {masterVisibleCols.objeto && <td className="p-3 text-slate-500 break-words">{row.objeto}</td>}
                                     {masterVisibleCols.gestorFiscal && <td className="p-3 break-words">
