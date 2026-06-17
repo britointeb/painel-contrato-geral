@@ -1,5 +1,14 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
+if (window.Chart) {
+    Chart.defaults.font.family = "'Outfit', sans-serif";
+    Chart.defaults.set('plugins.tooltip', {
+        titleFont: { family: 'Outfit', weight: '700' },
+        bodyFont: { family: 'Outfit', weight: '600' },
+        footerFont: { family: 'Outfit', weight: '700' }
+    });
+}
+
 if (window.ChartDataLabels) {
     Chart.register(ChartDataLabels);
     Chart.defaults.set('plugins.datalabels', { display: false });
@@ -1898,26 +1907,26 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
             
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-xs font-black text-slate-800 uppercase mb-6">Evolução por Ano (Iniciados, Encerrados, Durante e Empenhado)</h3>
+                    <h3 className="text-xs font-black text-slate-800 uppercase mb-6">Contratos Iniciados/Encerrados por Ano e Valor Empenhado</h3>
                     <div className="h-[400px]">
                         <ChartComponent id="gAno" type="bar" data={{
                             labels: dataByAno.map(d => d.label),
                             datasets: [
                                 {
                                     label: 'Contratos Iniciados', data: dataByAno.map(d => d.iniciados), backgroundColor: '#22c55e', yAxisID: 'y_qtd', borderRadius: 4, order: 2,
-                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: -90, font: { size: 10, weight: 'bold' }, formatter: v => v }
+                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: -90, font: { family: 'Outfit', size: 10, weight: 'bold' }, formatter: v => v }
                                 },
                                 {
                                     label: 'Contratos Encerrados', data: dataByAno.map(d => d.encerrados), backgroundColor: '#ef4444', yAxisID: 'y_qtd', borderRadius: 4, order: 2,
-                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: -90, font: { size: 10, weight: 'bold' }, formatter: v => v }
+                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: -90, font: { family: 'Outfit', size: 10, weight: 'bold' }, formatter: v => v }
                                 },
                                 {
                                     label: 'Contratos Durante', data: dataByAno.map(d => d.durante), backgroundColor: '#8b5cf6', yAxisID: 'y_qtd', borderRadius: 4, order: 2,
-                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: -90, font: { size: 10, weight: 'bold' }, formatter: v => v }
+                                    datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'end', align: 'start', rotation: -90, font: { family: 'Outfit', size: 10, weight: 'bold' }, formatter: v => v }
                                 },
                                 { 
                                     label: 'Valor Empenhado (Iniciados)', data: dataByAno.map(d => d.empenhado), backgroundColor: '#3b82f6', borderColor: '#3b82f6', yAxisID: 'y_val', type: 'line', borderWidth: 3, tension: 0.3, pointRadius: 5, order: 1,
-                                    datalabels: { display: true, color: '#1e3a8a', anchor: 'end', align: 'bottom', rotation: -90, font: { size: 10, weight: 'bold' }, formatter: v => shortenNumber(v) }
+                                    datalabels: { display: true, color: '#1e3a8a', anchor: 'end', align: 'bottom', rotation: -90, font: { family: 'Outfit', size: 10, weight: 'bold' }, formatter: v => shortenNumber(v) }
                                 }
                             ]
                         }} options={{ 
