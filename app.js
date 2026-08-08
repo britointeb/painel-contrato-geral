@@ -199,7 +199,61 @@ const normalizeStr = (str) => {
     return str.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9%]/g, '');
 };
 
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwwqirbdPVTmqm9KHHYsnr0zsW9DHmnLaQfVMpJtN6xwwAWg7yNv4_Bcu_1cLlcBaqR/exec";
+// Implantação correspondente ao Code.gs V19 (2026-08-08-orcamentario-por-documento-ccor).
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwDf4gT-FPusNrbuXS0t-dE-LCLmqXmMVG7QX34GuQUHWc3EwjEargr1Mdi4DeXwpxf/exec";
+const DASH_CACHE_KEY = 'dashData_PainelGeral_api_v19';
+
+const AUTH_STORAGE_KEYS = [
+    'token_PainelGeral',
+    'user_PainelGeral',
+    'perfil_PainelGeral',
+    'ativo_PainelGeral',
+    'validade_PainelGeral',
+    'duracao_diaria_horas_PainelGeral',
+    'expira_PainelGeral'
+];
+
+const clearAuthStorage = () => {
+    try { AUTH_STORAGE_KEYS.forEach(key => sessionStorage.removeItem(key)); }
+    catch(e) {}
+};
+
+const isAuthSessionValid = () => {
+    try {
+        const token = sessionStorage.getItem('token_PainelGeral');
+        if (!token) return false;
+
+        const expiraEm = Number(sessionStorage.getItem('expira_PainelGeral') || 0);
+        if (expiraEm && Date.now() > expiraEm) {
+            clearAuthStorage();
+            return false;
+        }
+
+        return true;
+    } catch(e) {
+        return false;
+    }
+};
+
+const readAppsScriptJson = async (response, operationLabel) => {
+    const responseText = await response.text();
+
+    try {
+        return JSON.parse(responseText);
+    } catch(parseError) {
+        const normalized = normalizeStr(responseText || '');
+        const missingDeployment = normalized.includes('paginanaoencontrada') ||
+            normalized.includes('naofoipossivelabriroarquivo') ||
+            normalized.includes('pagenotfound');
+
+        if (missingDeployment) {
+            throw new Error('A URL /exec do Apps Script não existe ou está incorreta. Atualize a implantação como Aplicativo da Web.');
+        }
+
+        const statusInfo = response && response.status ? ` HTTP ${response.status}.` : '';
+        throw new Error(`O Apps Script retornou uma resposta inválida durante ${operationLabel}.${statusInfo}`);
+    }
+};
 
 const parseValue = (val) => {
     if (typeof val === 'number') return val;
@@ -925,6 +979,15 @@ function Dashboard() {
     const [fCompra, setFCompra] = useState([]); 
     const [fModalidade, setFModalidade] = useState([]);
     const [fFornecedor, setFFornecedor] = useState([]);
+    const [fAoCodigo, setFAoCodigo] = useState([]);
+    const [fAoNome, setFAoNome] = useState([]);
+    const [fPoCodigo, setFPoCodigo] = useState([]);
+    const [fPoNome, setFPoNome] = useState([]);
+    const [fPtres, setFPtres] = useState([]);
+    const [fPiCod, setFPiCod] = useState([]);
+    const [fPiNome, setFPiNome] = useState([]);
+    const [fNdCodigo, setFNdCodigo] = useState([]);
+    const [fNdNome, setFNdNome] = useState([]);
     
     const [dInicDe, setDInicDe] = useState("");
     const [dInicAte, setDInicAte] = useState("");
@@ -990,6 +1053,7 @@ function Dashboard() {
 
     const clearAllFilters = () => {
         setFFiscal([]); setFGestor([]); setFFiscalSub([]); setFGestorSub([]); setFSecLog([]); setFContrato([]); setFCompra([]); setFModalidade([]); setFFornecedor([]);
+        setFAoCodigo([]); setFAoNome([]); setFPoCodigo([]); setFPoNome([]); setFPtres([]); setFPiCod([]); setFPiNome([]); setFNdCodigo([]); setFNdNome([]);
         setDInicDe(""); setDInicAte(""); setDFimDe(""); setDFimAte("");
         setSearchContrato(""); setSearchSituacao(""); setSearchSecLog(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
         setFSituacaoTags([]);
@@ -1037,21 +1101,96 @@ function Dashboard() {
     const toggleCSup = () => { if (isCSupActive) setFSecLog([]); else setFSecLog(cSupItems); };
 
     const logout = () => {
+        clearAuthStorage();
         try {
-            sessionStorage.removeItem('token_PainelGeral');
-            sessionStorage.removeItem('user_PainelGeral');
-            sessionStorage.removeItem('perfil_PainelGeral');
-            sessionStorage.removeItem('ativo_PainelGeral');
-            sessionStorage.removeItem('validade_PainelGeral');
+            localStorage.removeItem(DASH_CACHE_KEY);
             localStorage.removeItem('dashData_PainelGeral');
         } catch(e) {}
         window.location.reload();
     };
 
-    const processData = (rowsArray, fromCache = false) => {
+    const buildOrcamentarioByContrato = (orcamentarioRows) => {
+        const result = {};
+        if (!orcamentarioRows || orcamentarioRows.length < 2) return result;
+
+        const headers = orcamentarioRows[0] || [];
+        const headerMap = {};
+        headers.forEach((header, index) => {
+            const normalized = normalizeStr(header);
+            if (normalized) headerMap[normalized] = index;
+        });
+
+        const getValue = (row, exactNames, fallbackKeywords = []) => {
+            for (const name of exactNames) {
+                const index = headerMap[normalizeStr(name)];
+                if (index !== undefined && row[index] !== undefined && row[index] !== null) {
+                    return row[index].toString().trim();
+                }
+            }
+            for (const keyword of fallbackKeywords) {
+                const normalizedKeyword = normalizeStr(keyword);
+                const headerKey = Object.keys(headerMap).find(key => key.includes(normalizedKeyword));
+                if (headerKey) {
+                    const value = row[headerMap[headerKey]];
+                    return value !== undefined && value !== null ? value.toString().trim() : '';
+                }
+            }
+            return '';
+        };
+
+        const createAccumulator = () => ({
+            ao_codigo_values: new Set(), ao_nome_values: new Set(),
+            po_codigo_values: new Set(), po_nome_values: new Set(),
+            ptres_values: new Set(), pi_cod_values: new Set(),
+            pi_nome_values: new Set(), nd_codigo_values: new Set(), nd_nome_values: new Set()
+        });
+
+        const addValue = (accumulator, key, value) => {
+            const normalizedValue = (value || '').toString().trim().toUpperCase();
+            if (normalizedValue && normalizedValue !== '-') accumulator[key].add(normalizedValue);
+        };
+
+        orcamentarioRows.slice(1).forEach(row => {
+            if (!row || !row.length) return;
+            const contrato = getValue(
+                row,
+                ['COL_NR_CONTR_BASE', 'Contrato', 'Número Contrato', 'Numero Contrato'],
+                ['contr base', 'contrato']
+            ).toUpperCase();
+            if (!contrato || contrato === '-') return;
+
+            if (!result[contrato]) result[contrato] = createAccumulator();
+            const target = result[contrato];
+            addValue(target, 'ao_codigo_values', getValue(row, ['Ação Governo Código', 'AO Código', 'AO Codigo'], ['acao governo codigo']));
+            addValue(target, 'ao_nome_values', getValue(row, ['Ação Governo Nome', 'AO Nome'], ['acao governo nome']));
+            addValue(target, 'po_codigo_values', getValue(row, ['Plano Orçamentário Código PO', 'PO Código', 'PO Codigo'], ['plano orcamentario codigo po']));
+            addValue(target, 'po_nome_values', getValue(row, ['Plano Orçamentário Nome', 'PO Nome'], ['plano orcamentario nome']));
+            addValue(target, 'ptres_values', getValue(row, ['PTRES Código', 'PTRES Codigo', 'PTRES'], ['ptres codigo', 'ptres']));
+            addValue(target, 'pi_cod_values', getValue(row, ['PI Código PI', 'PI Código', 'PI Codigo'], ['pi codigo pi']));
+            addValue(target, 'pi_nome_values', getValue(row, ['PI Nome'], ['pi nome']));
+            addValue(target, 'nd_codigo_values', getValue(row, ['ND_DOC', 'ND Código', 'ND Codigo'], ['nd doc']));
+            addValue(target, 'nd_nome_values', getValue(row, ['ND_NOME', 'ND Nome'], ['nd nome']));
+        });
+
+        Object.values(result).forEach(accumulator => {
+            Object.keys(accumulator).forEach(key => {
+                accumulator[key] = [...accumulator[key]].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+            });
+        });
+
+        return result;
+    };
+
+    const emptyOrcamentario = () => ({
+        ao_codigo_values: [], ao_nome_values: [], po_codigo_values: [], po_nome_values: [],
+        ptres_values: [], pi_cod_values: [], pi_nome_values: [], nd_codigo_values: [], nd_nome_values: []
+    });
+
+    const processData = (rowsArray, orcamentarioRows = [], fromCache = false) => {
         if (!rowsArray || rowsArray.length < 2) { setStatus("Planilha vazia ou aba não encontrada."); setLoading(false); return; }
         setStatus("A estruturar matriz de dados...");
         const headers = rowsArray[0];
+        const orcamentarioByContrato = buildOrcamentarioByContrato(orcamentarioRows);
         const hoje = new Date(); hoje.setHours(0,0,0,0);
 
         const mappedRaw = rowsArray.slice(1).map(row => {
@@ -1086,6 +1225,7 @@ function Dashboard() {
             const v_pago = parseValue(getVal(["TOTAL PAGO"]));
             const v_cancelado = parseValue(getVal(["TOTAL CANCELADO"]));
             const v_bloqueado = parseValue(getVal(["TOTAL BLOQUEADO"]));
+            const contrato = (getVal(["Número Contrato", "numero_contrato", "COL_NR_CONTR_BASE"]) || "-").toUpperCase();
 
             const v_a_liquidar = v_empenhado - v_liquidado - v_cancelado - v_bloqueado;
             const v_a_pagar = v_empenhado - v_pago - v_cancelado - v_bloqueado;
@@ -1093,7 +1233,8 @@ function Dashboard() {
             const p_a_pagar = v_empenhado ? v_a_pagar / v_empenhado : 0;
 
             return {
-                contrato: (getVal(["Número Contrato", "numero_contrato"]) || "-").toUpperCase(),
+                contrato,
+                ...(orcamentarioByContrato[contrato] || emptyOrcamentario()),
                 fornecedor: (getVal(["Fornecedor"]) || "-").toUpperCase(),
                 objeto: (getVal(["Objeto"]) || "-").toUpperCase(),
                 fiscal: (getVal(["FISCAL_TITULAR", "Fiscal Titular"]) || "N/I").toUpperCase(),
@@ -1186,7 +1327,7 @@ function Dashboard() {
         
         setRawData(mappedRaw);
         if (!fromCache) {
-            try { localStorage.setItem('dashData_PainelGeral', JSON.stringify(mappedRaw)); } catch(e) {}
+            try { localStorage.setItem(DASH_CACHE_KEY, JSON.stringify(mappedRaw)); } catch(e) {}
         }
         setLoading(false);
     };
@@ -1194,12 +1335,12 @@ function Dashboard() {
     const loadData = async (forceSync = false, manualFileContent = null) => {
         setLoading(true);
         if (manualFileContent) {
-            Papa.parse(manualFileContent, { header: false, skipEmptyLines: true, complete: (res) => { processData(res.data, true); setStatus("Offline - CSV Local"); } });
+            Papa.parse(manualFileContent, { header: false, skipEmptyLines: true, complete: (res) => { processData(res.data, [], true); setStatus("Offline - CSV Local (sem classificação orçamentária)"); } });
             return;
         }
         if (!forceSync) {
             try {
-                const cachedData = localStorage.getItem('dashData_PainelGeral');
+                const cachedData = localStorage.getItem(DASH_CACHE_KEY);
                 if (cachedData) { setRawData(JSON.parse(cachedData)); setStatus("Online - Dados carregados via Apps Script"); setLoading(false); return; }
             } catch(e) {}
         }
@@ -1208,14 +1349,23 @@ function Dashboard() {
             const token = sessionStorage.getItem('token_PainelGeral');
             if (!token) throw new Error("Token de acesso não encontrado. Faça login novamente.");
             const response = await fetch(`${APPS_SCRIPT_URL}?acao=dados&token=${encodeURIComponent(token)}`);
-            if (!response.ok) throw new Error("Falha na comunicação com o Apps Script.");
-            const json = await response.json();
-            if (!json.ok) throw new Error(json.mensagem || "Falha ao obter dados pelo Apps Script.");
+            const json = await readAppsScriptJson(response, 'a sincronização dos dados');
+            if (!json.ok) {
+                const mensagem = json.mensagem || "Falha ao obter dados pelo Apps Script.";
+                if (/sess[aã]o|expirad|token/i.test(mensagem)) {
+                    clearAuthStorage();
+                    try { localStorage.removeItem(DASH_CACHE_KEY); } catch(e) {}
+                    window.location.reload();
+                    return;
+                }
+                throw new Error(mensagem);
+            }
             const rows = json.geral || json.values;
             if (!rows || rows.length < 2) throw new Error("Apps Script não retornou dados da planilha geral.");
-            processData(rows, false);
-            const extra = json.acesso && json.acesso.limitado ? ` | Acessos restantes: ${json.acesso.restantes}` : '';
-            setStatus("Online - Dados carregados via Apps Script");
+            processData(rows, json.orcamentario || [], false);
+            const controle = json.controleAcesso || {};
+            const extra = controle.restantes !== null && controle.restantes !== undefined ? ` | Acessos restantes: ${controle.restantes}` : '';
+            setStatus(`Online - Dados carregados via Apps Script${extra}`);
         } catch (error) { 
             console.error(error);
             setStatus(error.message || "Falha de Acesso à API. Utilize Carga Manual."); setLoading(false); 
@@ -1223,6 +1373,31 @@ function Dashboard() {
     };
 
     useEffect(() => { loadData(false, null); }, []);
+
+    const filterOptions = useMemo(() => {
+        const scalarFields = ['fiscal', 'gestor', 'fiscal_sub', 'gestor_sub', 'sec_log', 'contrato', 'compra', 'modalidade', 'fornecedor'];
+        const arrayFields = ['ao_codigo_values', 'ao_nome_values', 'po_codigo_values', 'po_nome_values', 'ptres_values', 'pi_cod_values', 'pi_nome_values', 'nd_codigo_values', 'nd_nome_values'];
+        const accumulators = {};
+        [...scalarFields, ...arrayFields].forEach(field => { accumulators[field] = new Set(); });
+
+        rawData.forEach(item => {
+            scalarFields.forEach(field => {
+                const value = item[field];
+                if (value && value !== '-') accumulators[field].add(value);
+            });
+            arrayFields.forEach(field => {
+                (Array.isArray(item[field]) ? item[field] : []).forEach(value => {
+                    if (value && value !== '-') accumulators[field].add(value);
+                });
+            });
+        });
+
+        const options = {};
+        Object.keys(accumulators).forEach(field => {
+            options[field] = [...accumulators[field]].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+        });
+        return options;
+    }, [rawData]);
 
     const filteredData = useMemo(() => {
         let filtered = rawData.filter(item => {
@@ -1235,6 +1410,17 @@ function Dashboard() {
             const mForn = fFornecedor.length === 0 || fFornecedor.includes(item.fornecedor);
             const mCompra = fCompra.length === 0 || fCompra.includes(item.compra);
             const mMod = fModalidade.length === 0 || fModalidade.includes(item.modalidade);
+            const matchesOrcamentario = (selected, field) => selected.length === 0 ||
+                selected.some(value => (Array.isArray(item[field]) ? item[field] : []).includes(value));
+            const mAoCodigo = matchesOrcamentario(fAoCodigo, 'ao_codigo_values');
+            const mAoNome = matchesOrcamentario(fAoNome, 'ao_nome_values');
+            const mPoCodigo = matchesOrcamentario(fPoCodigo, 'po_codigo_values');
+            const mPoNome = matchesOrcamentario(fPoNome, 'po_nome_values');
+            const mPtres = matchesOrcamentario(fPtres, 'ptres_values');
+            const mPiCod = matchesOrcamentario(fPiCod, 'pi_cod_values');
+            const mPiNome = matchesOrcamentario(fPiNome, 'pi_nome_values');
+            const mNdCodigo = matchesOrcamentario(fNdCodigo, 'nd_codigo_values');
+            const mNdNome = matchesOrcamentario(fNdNome, 'nd_nome_values');
             
             const mDDe = !dInicDe || (item.dtInicVal && item.dtInicVal >= new Date(dInicDe+"T00:00:00").getTime());
             const mDAte = !dInicAte || (item.dtInicVal && item.dtInicVal <= new Date(dInicAte+"T23:59:59").getTime());
@@ -1261,7 +1447,9 @@ function Dashboard() {
                 if (numFilters[key].min !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) < parseFloat(numFilters[key].min)) { mNum = false; break; }
                 if (numFilters[key].max !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) > parseFloat(numFilters[key].max)) { mNum = false; break; }
             }
-            return mFisc && mGest && mFiscSub && mGestSub && mSec && mCont && mForn && mCompra && mMod && mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sSecLog && sForn && sObj && sGest && mSitTag && mNum;
+            return mFisc && mGest && mFiscSub && mGestSub && mSec && mCont && mForn && mCompra && mMod &&
+                mAoCodigo && mAoNome && mPoCodigo && mPoNome && mPtres && mPiCod && mPiNome && mNdCodigo && mNdNome &&
+                mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sSecLog && sForn && sObj && sGest && mSitTag && mNum;
         });
 
         if (sortConfig.key) {
@@ -1278,7 +1466,9 @@ function Dashboard() {
             });
         }
         return filtered;
-    }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade, dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchSecLog, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
+    }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade,
+        fAoCodigo, fAoNome, fPoCodigo, fPoNome, fPtres, fPiCod, fPiNome, fNdCodigo, fNdNome,
+        dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchSecLog, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
 
     const totalsMaster = useMemo(() => {
         let global = 0, dif = 0, emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
@@ -1646,15 +1836,29 @@ function Dashboard() {
                     </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
-                    <MultiSelect label="FISCAL" options={[...new Set(rawData.map(r => r.fiscal))].sort()} selected={fFiscal} onChange={setFFiscal} />
-                    <MultiSelect label="GESTOR" options={[...new Set(rawData.map(r => r.gestor))].sort()} selected={fGestor} onChange={setFGestor} />
-                    <MultiSelect label="F. SUBSTITUTO" options={[...new Set(rawData.map(r => r.fiscal_sub))].sort()} selected={fFiscalSub} onChange={setFFiscalSub} />
-                    <MultiSelect label="G. SUBSTITUTO" options={[...new Set(rawData.map(r => r.gestor_sub))].sort()} selected={fGestorSub} onChange={setFGestorSub} />
-                    <MultiSelect label="SEC LOG" options={[...new Set(rawData.map(r => r.sec_log))].sort()} selected={fSecLog} onChange={setFSecLog} />
-                    <MultiSelect label="CONTRATO" options={[...new Set(rawData.map(r => r.contrato))].sort()} selected={fContrato} onChange={setFContrato} />
-                    <MultiSelect label="Nº COMPRA" options={[...new Set(rawData.map(r => r.compra))].sort()} selected={fCompra} onChange={setFCompra} />
-                    <MultiSelect label="MODALIDADE" options={[...new Set(rawData.map(r => r.modalidade))].sort()} selected={fModalidade} onChange={setFModalidade} />
-                    <MultiSelect label="FORNECEDOR" options={[...new Set(rawData.map(r => r.fornecedor))].sort()} selected={fFornecedor} onChange={setFFornecedor} />
+                    <MultiSelect label="FISCAL" options={filterOptions.fiscal} selected={fFiscal} onChange={setFFiscal} />
+                    <MultiSelect label="GESTOR" options={filterOptions.gestor} selected={fGestor} onChange={setFGestor} />
+                    <MultiSelect label="F. SUBSTITUTO" options={filterOptions.fiscal_sub} selected={fFiscalSub} onChange={setFFiscalSub} />
+                    <MultiSelect label="G. SUBSTITUTO" options={filterOptions.gestor_sub} selected={fGestorSub} onChange={setFGestorSub} />
+                    <MultiSelect label="SEC LOG" options={filterOptions.sec_log} selected={fSecLog} onChange={setFSecLog} />
+                    <MultiSelect label="CONTRATO" options={filterOptions.contrato} selected={fContrato} onChange={setFContrato} />
+                    <MultiSelect label="Nº COMPRA" options={filterOptions.compra} selected={fCompra} onChange={setFCompra} />
+                    <MultiSelect label="MODALIDADE" options={filterOptions.modalidade} selected={fModalidade} onChange={setFModalidade} />
+                    <MultiSelect label="FORNECEDOR" options={filterOptions.fornecedor} selected={fFornecedor} onChange={setFFornecedor} />
+                </div>
+                <div className="budget-filter-block mb-4">
+                    <p className="budget-filter-title">Classificação Orçamentária</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                        <MultiSelect label="AO CÓDIGO" options={filterOptions.ao_codigo_values} selected={fAoCodigo} onChange={setFAoCodigo} />
+                        <MultiSelect label="AO NOME" options={filterOptions.ao_nome_values} selected={fAoNome} onChange={setFAoNome} />
+                        <MultiSelect label="PO CÓDIGO" options={filterOptions.po_codigo_values} selected={fPoCodigo} onChange={setFPoCodigo} />
+                        <MultiSelect label="PO NOME" options={filterOptions.po_nome_values} selected={fPoNome} onChange={setFPoNome} />
+                        <MultiSelect label="PTRES" options={filterOptions.ptres_values} selected={fPtres} onChange={setFPtres} />
+                        <MultiSelect label="PI COD" options={filterOptions.pi_cod_values} selected={fPiCod} onChange={setFPiCod} />
+                        <MultiSelect label="PI NOME" options={filterOptions.pi_nome_values} selected={fPiNome} onChange={setFPiNome} />
+                        <MultiSelect label="ND CÓDIGO" options={filterOptions.nd_codigo_values} selected={fNdCodigo} onChange={setFNdCodigo} />
+                        <MultiSelect label="ND NOME" options={filterOptions.nd_nome_values} selected={fNdNome} onChange={setFNdNome} />
+                    </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                     <DateInput label="INÍCIO (DE)" value={dInicDe} onChange={setDInicDe} />
@@ -2233,7 +2437,7 @@ class ErrorBoundary extends React.Component {
             <div className="min-h-screen flex flex-col items-center justify-center bg-red-50 p-8">
                 <h2 className="text-2xl font-black text-red-600 mb-4 uppercase">Erro Detetado no Painel</h2>
                 <p className="text-slate-700 mb-6 font-bold">{this.state.error.toString()}</p>
-                <button onClick={() => { sessionStorage.clear(); localStorage.removeItem('dashData_PainelGeral'); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded shadow font-bold hover:bg-red-700">Limpar Sessão e Recarregar</button>
+                <button onClick={() => { clearAuthStorage(); localStorage.removeItem(DASH_CACHE_KEY); localStorage.removeItem('dashData_PainelGeral'); window.location.reload(); }} className="bg-red-600 text-white px-6 py-3 rounded shadow font-bold hover:bg-red-700">Limpar Sessão e Recarregar</button>
             </div>
         );
         return this.props.children; 
@@ -2241,10 +2445,7 @@ class ErrorBoundary extends React.Component {
 }
 
 function App() {
-    const [isAuthenticated, setIsAuthenticated] = useState(() => {
-        try { return !!sessionStorage.getItem('token_PainelGeral'); } 
-        catch(e) { return false; }
-    });
+    const [isAuthenticated, setIsAuthenticated] = useState(() => isAuthSessionValid());
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
@@ -2262,7 +2463,7 @@ function App() {
             body.append("senha", password);
 
             const resp = await fetch(APPS_SCRIPT_URL, { method: "POST", body });
-            const json = await resp.json();
+            const json = await readAppsScriptJson(resp, 'o login');
 
             if (!json.ok) {
                 setError(json.mensagem || "Credenciais inválidas.");
@@ -2275,7 +2476,12 @@ function App() {
             sessionStorage.setItem('perfil_PainelGeral', json.usuario?.perfil || '');
             sessionStorage.setItem('ativo_PainelGeral', json.usuario?.ativo || '');
             sessionStorage.setItem('validade_PainelGeral', json.usuario?.validade || '');
-            try { localStorage.removeItem('dashData_PainelGeral'); } catch(e) {}
+            sessionStorage.setItem('duracao_diaria_horas_PainelGeral', json.usuario?.duracao_diaria_horas || '');
+            sessionStorage.setItem('expira_PainelGeral', json.usuario?.expira_em || '');
+            try {
+                localStorage.removeItem(DASH_CACHE_KEY);
+                localStorage.removeItem('dashData_PainelGeral');
+            } catch(e) {}
 
             setIsAuthenticated(true);
             setIsLogging(false);
