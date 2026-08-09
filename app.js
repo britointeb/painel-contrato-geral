@@ -201,7 +201,7 @@ const normalizeStr = (str) => {
 
 // Implantação correspondente ao Code.gs V19 (2026-08-08-orcamentario-por-documento-ccor).
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwDf4gT-FPusNrbuXS0t-dE-LCLmqXmMVG7QX34GuQUHWc3EwjEargr1Mdi4DeXwpxf/exec";
-const DASH_CACHE_KEY = 'dashData_PainelGeral_api_v19';
+const DASH_CACHE_KEY = 'dashData_PainelGeral_api_v19_recebido_contabil_v3';
 
 const AUTH_STORAGE_KEYS = [
     'token_PainelGeral',
@@ -388,7 +388,8 @@ const exportMasterColumns = [
     { header: "FIM", key: "data_fim" }, { header: "% TEMPO", key: "perc_tempo", isPercent: true }, 
     { header: "PASSARAM", key: "dias_passaram" }, { header: "FALTAM", key: "encerrando_dias" },
     { header: "GLOBAL-EMP", key: "dif_global", isCurrency: true }, { header: "GLOBAL", key: "v_global", isCurrency: true }, 
-    { header: "EMPENHADO", key: "v_empenhado", isCurrency: true }, 
+    { header: "EMPENHADO", key: "v_empenhado", isCurrency: true },
+    { header: "RECEBIDO", key: "v_recebido", isCurrency: true }, { header: "RCB %", key: "p_recebido", isPercent: true },
     { header: "LIQUIDADO", key: "v_liquidado", isCurrency: true }, { header: "LIQ %", key: "p_liquidado", isPercent: true }, 
     { header: "A LIQUIDAR", key: "v_a_liquidar", isCurrency: true }, { header: "A LIQ %", key: "p_a_liquidar", isPercent: true }, 
     { header: "PAGO", key: "v_pago", isCurrency: true }, { header: "PAGO %", key: "p_pago", isPercent: true }, 
@@ -570,6 +571,8 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
             const others = processed.slice(9).reduce((acc, curr) => {
                 acc.count += curr.count || 0;
                 acc.total += curr.total || 0;
+                acc.recebido += curr.recebido || 0;
+                acc.a_receber += curr.a_receber || 0;
                 acc.liquidado += curr.liquidado || 0;
                 acc.a_liquidar += curr.a_liquidar || 0;
                 acc.pago += curr.pago || 0;
@@ -578,7 +581,7 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
                 acc.cancelado += curr.cancelado || 0;
                 acc.executado += curr.executado || 0;
                 return acc;
-            }, { label: "OUTROS", count: 0, total: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0 });
+            }, { label: "OUTROS", count: 0, total: 0, recebido: 0, a_receber: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0 });
             processed = [...top9, others];
         }
         return processed;
@@ -587,13 +590,14 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
     const chartLabels = cleanData.map(d => formatLabelMultiLine(d.label, 15));
     
     const metricNames = {
-        'total': 'Empenhado', 'liquidado': 'Liquidado', 'a_liquidar': 'A Liquidar', 
+        'total': 'Empenhado', 'recebido': 'Recebido', 'a_receber': 'A Receber',
+        'liquidado': 'Liquidado', 'a_liquidar': 'A Liquidar',
         'pago': 'Pago (Exec Líq)', 'a_pagar': 'A Pagar',
         'bloqueado': 'Bloqueado', 'cancelado': 'Cancelado', 'executado': 'Executado',
         'count': 'QTD Contratos'
     };
     const currentMetricName = metricNames[activeMetric];
-    const displayTitle = isFinancial ? title.replace(/Empenhado/i, currentMetricName.split(' ')[0] + (currentMetricName.includes('Liq') ? ' Liq' : '') + (currentMetricName.includes('Pag') ? ' Pag' : '')) : title;
+    const displayTitle = isFinancial ? title.replace(/Empenhado/i, currentMetricName) : title;
 
     const pieData = {
         labels: cleanData.map(d => d.label),
@@ -745,6 +749,8 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
                     {isFinancial && (
                         <select value={finMetric} onChange={(e) => setFinMetric(e.target.value)} className="text-[9px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
                             <option value="total">Empenhado</option>
+                            <option value="recebido">Recebido</option>
+                            <option value="a_receber">A Receber</option>
                             <option value="liquidado">Liquidado</option>
                             <option value="a_liquidar">A Liquidar</option>
                             <option value="pago">Pago / Exec Líq</option>
@@ -942,6 +948,7 @@ function CollapsibleSection({ title, children, defaultOpen = false, globalTrigge
 
 function Dashboard() {
     const [rawData, setRawData] = useState([]);
+    const [activePage, setActivePage] = useState(1);
     const [loading, setLoading] = useState(true);
     const [status, setStatus] = useState("A verificar sessão local...");
     const currentUser = sessionStorage.getItem('user_PainelGeral') || 'Usuário';
@@ -1005,10 +1012,11 @@ function Dashboard() {
     const [searchGestorFiscal, setSearchGestorFiscal] = useState("");
 
     const [showMasterColsMenu, setShowMasterColsMenu] = useState(false);
+    const financeTableRef = useRef(null);
     const masterColumnLabels = {
         contrato: "CONTRATO", situacao: "SITUAÇÃO", secLog: "SEC LOG", fornecedor: "FORNECEDOR", objeto: "OBJETO", gestorFiscal: "GESTORES/FISCAIS",
         dataInic: "INÍCIO", dataFim: "FIM", percTempo: "% TEMPO", diasPassaram: "PASSARAM", encerrandoDias: "FALTAM",
-        difGlobal: "GLOBAL-EMP", vGlobal: "GLOBAL", empenhado: "EMPENHADO", liquidado: "LIQUIDADO", pLiquidado: "LIQ %",
+        difGlobal: "GLOBAL-EMP", vGlobal: "GLOBAL", empenhado: "EMPENHADO", recebido: "RECEBIDO", pRecebido: "RCB %", liquidado: "LIQUIDADO", pLiquidado: "LIQ %",
         aLiquidar: "A LIQUIDAR", pALiquidar: "A LIQ %", pago: "PAGO", pPago: "PAGO %", aPagar: "A PAGAR", pAPagar: "A PAGAR %",
         bloqueado: "BLOQUEADO", pBloqueado: "BLOQ %", cancelado: "CANCELADO", pCancelado: "CANC %", executado: "EXECUTADO", pExecutado: "EXEC %",
         execLiq: "EXEC LIQ", pExecLiq: "EXEC LIQ %"
@@ -1016,7 +1024,7 @@ function Dashboard() {
     const [masterVisibleCols, setMasterVisibleCols] = useState({
         contrato: true, situacao: true, secLog: true, fornecedor: true, objeto: true, gestorFiscal: true,
         dataInic: true, dataFim: true, percTempo: true, diasPassaram: true, encerrandoDias: true,
-        difGlobal: true, vGlobal: true, empenhado: true, liquidado: true, pLiquidado: true,
+        difGlobal: true, vGlobal: true, empenhado: true, recebido: true, pRecebido: true, liquidado: true, pLiquidado: true,
         aLiquidar: true, pALiquidar: true, pago: true, pPago: true, aPagar: true, pAPagar: true,
         bloqueado: true, pBloqueado: true, cancelado: true, pCancelado: true, executado: true, pExecutado: true,
         execLiq: true, pExecLiq: true
@@ -1024,7 +1032,8 @@ function Dashboard() {
 
     const initialNumFilters = {
         perc_tempo: {min:'', max:''}, dias_passaram: {min:'', max:''}, encerrando_dias: {min:'', max:''}, 
-        dif_global: {min:'', max:''}, v_global: {min:'', max:''}, v_empenhado: {min:'', max:''}, 
+        dif_global: {min:'', max:''}, v_global: {min:'', max:''}, v_empenhado: {min:'', max:''},
+        v_recebido: {min:'', max:''}, p_recebido: {min:'', max:''},
         v_liquidado: {min:'', max:''}, p_liquidado: {min:'', max:''}, 
         v_a_liquidar: {min:'', max:''}, p_a_liquidar: {min:'', max:''}, 
         v_pago: {min:'', max:''}, p_pago: {min:'', max:''}, 
@@ -1186,10 +1195,76 @@ function Dashboard() {
         ptres_values: [], pi_cod_values: [], pi_nome_values: [], nd_codigo_values: [], nd_nome_values: []
     });
 
-    const processData = (rowsArray, orcamentarioRows = [], fromCache = false) => {
+    const normalizeContractKey = (value) => String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+
+    const buildRecebidoByContrato = (contabilRows) => {
+        const recebidoByContrato = {};
+        if (!contabilRows || contabilRows.length < 2) return recebidoByContrato;
+
+        const headers = contabilRows[0] || [];
+        const headerMap = {};
+        headers.forEach((header, index) => {
+            const normalized = normalizeStr(header);
+            if (normalized) headerMap[normalized] = index;
+        });
+
+        const getValue = (row, exactNames, fallbackKeywords = []) => {
+            for (const name of exactNames) {
+                const index = headerMap[normalizeStr(name)];
+                if (index !== undefined && row[index] !== undefined && row[index] !== null) {
+                    return row[index].toString().trim();
+                }
+            }
+            for (const keyword of fallbackKeywords) {
+                const normalizedKeyword = normalizeStr(keyword);
+                const headerKey = Object.keys(headerMap).find(key => key.includes(normalizedKeyword));
+                if (headerKey) {
+                    const value = row[headerMap[headerKey]];
+                    return value !== undefined && value !== null ? value.toString().trim() : '';
+                }
+            }
+            return '';
+        };
+
+        contabilRows.slice(1).forEach(row => {
+            if (!row || !row.length) return;
+
+            const contractKey = normalizeContractKey(getValue(
+                row,
+                ['COL_NR_CONTR_BASE', 'Contrato', 'Número Contrato', 'Numero Contrato'],
+                ['contr base', 'contrato']
+            ));
+            if (!contractKey) return;
+
+            const information = getValue(
+                row,
+                ['ITEM_INFORMACAO', 'INTEN_INFORMACAO', 'Informação', 'Informacao'],
+                ['item informacao', 'inten informacao', 'informacao']
+            );
+            const rowIndicatesRecebido = normalizeStr(information).includes('recebido') ||
+                (!information && normalizeStr(row.join(' ')).includes('recebido'));
+            if (!rowIndicatesRecebido) return;
+
+            const rawValue = getValue(
+                row,
+                ['Valor Item (R$)', 'Valor (R$)', 'Valor'],
+                ['valor item', 'valor', 'vlr', 'montante', 'saldo']
+            );
+            recebidoByContrato[contractKey] = (recebidoByContrato[contractKey] || 0) + parseValue(rawValue);
+        });
+
+        return recebidoByContrato;
+    };
+
+    const processData = (rowsArray, contabilRows = [], orcamentarioRows = [], fromCache = false) => {
         if (!rowsArray || rowsArray.length < 2) { setStatus("Planilha vazia ou aba não encontrada."); setLoading(false); return; }
         setStatus("A estruturar matriz de dados...");
         const headers = rowsArray[0];
+        const recebidoByContrato = buildRecebidoByContrato(contabilRows);
         const orcamentarioByContrato = buildOrcamentarioByContrato(orcamentarioRows);
         const hoje = new Date(); hoje.setHours(0,0,0,0);
 
@@ -1226,11 +1301,13 @@ function Dashboard() {
             const v_cancelado = parseValue(getVal(["TOTAL CANCELADO"]));
             const v_bloqueado = parseValue(getVal(["TOTAL BLOQUEADO"]));
             const contrato = (getVal(["Número Contrato", "numero_contrato", "COL_NR_CONTR_BASE"]) || "-").toUpperCase();
+            const v_recebido = recebidoByContrato[normalizeContractKey(contrato)] || 0;
 
             const v_a_liquidar = v_empenhado - v_liquidado - v_cancelado - v_bloqueado;
             const v_a_pagar = v_empenhado - v_pago - v_cancelado - v_bloqueado;
             const p_a_liquidar = v_empenhado ? v_a_liquidar / v_empenhado : 0;
             const p_a_pagar = v_empenhado ? v_a_pagar / v_empenhado : 0;
+            const p_recebido = v_empenhado ? v_recebido / v_empenhado : 0;
 
             return {
                 contrato,
@@ -1251,8 +1328,7 @@ function Dashboard() {
                 dias_passaram: diasPassaram, perc_tempo: percTempo, encerrando_dias: diasRestantes,
                 
                 v_global: parseValue(getVal(["Valor Global"])), 
-                v_empenhado, v_liquidado, v_pago, v_bloqueado, v_cancelado,
-                v_recebido: parseValue(getVal(["TOTAL RECEBIDO", "VALOR RECEBIDO", "RECEBIDO"], ["recebido"])),
+                v_empenhado, v_recebido, p_recebido, v_liquidado, v_pago, v_bloqueado, v_cancelado,
                 v_executado: parseValue(getVal(["TOTAL EXECUTADO"])), 
                 
                 v_a_liquidar, p_a_liquidar, v_a_pagar, p_a_pagar,
@@ -1335,7 +1411,7 @@ function Dashboard() {
     const loadData = async (forceSync = false, manualFileContent = null) => {
         setLoading(true);
         if (manualFileContent) {
-            Papa.parse(manualFileContent, { header: false, skipEmptyLines: true, complete: (res) => { processData(res.data, [], true); setStatus("Offline - CSV Local (sem classificação orçamentária)"); } });
+            Papa.parse(manualFileContent, { header: false, skipEmptyLines: true, complete: (res) => { processData(res.data, [], [], true); setStatus("Offline - CSV Local (sem recebido contábil e classificação orçamentária)"); } });
             return;
         }
         if (!forceSync) {
@@ -1362,7 +1438,7 @@ function Dashboard() {
             }
             const rows = json.geral || json.values;
             if (!rows || rows.length < 2) throw new Error("Apps Script não retornou dados da planilha geral.");
-            processData(rows, json.orcamentario || [], false);
+            processData(rows, json.contabil || [], json.orcamentario || [], false);
             const controle = json.controleAcesso || {};
             const extra = controle.restantes !== null && controle.restantes !== undefined ? ` | Acessos restantes: ${controle.restantes}` : '';
             setStatus(`Online - Dados carregados via Apps Script${extra}`);
@@ -1470,14 +1546,45 @@ function Dashboard() {
         fAoCodigo, fAoNome, fPoCodigo, fPoNome, fPtres, fPiCod, fPiNome, fNdCodigo, fNdNome,
         dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchSecLog, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
 
+    // Autofit real das colunas de INÍCIO até a última métrica visível.
+    useEffect(() => {
+        const frameId = requestAnimationFrame(() => {
+            const table = financeTableRef.current;
+            if (!table) return;
+
+            const metricHeaders = Array.from(table.querySelectorAll('thead th:not(.master-text-col)'));
+            metricHeaders.forEach(header => {
+                const columnIndex = header.cellIndex;
+                const cells = [
+                    header,
+                    ...Array.from(table.querySelectorAll('tbody tr')).map(row => row.cells[columnIndex]).filter(Boolean)
+                ];
+
+                cells.forEach(cell => {
+                    cell.style.width = 'auto';
+                    cell.style.minWidth = '0';
+                });
+
+                const contentWidth = cells.reduce((maxWidth, cell) => Math.max(maxWidth, cell.scrollWidth + 6), 0);
+                const fittedWidth = Math.min(190, Math.max(72, contentWidth));
+                cells.forEach(cell => {
+                    cell.style.width = `${fittedWidth}px`;
+                    cell.style.minWidth = `${fittedWidth}px`;
+                });
+            });
+        });
+
+        return () => cancelAnimationFrame(frameId);
+    }, [filteredData, masterVisibleCols]);
+
     const totalsMaster = useMemo(() => {
-        let global = 0, dif = 0, emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
+        let global = 0, dif = 0, emp = 0, rec = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
         filteredData.forEach(r => { 
-            global += r.v_global; dif += r.dif_global; emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; 
+            global += r.v_global; dif += r.dif_global; emp += r.v_empenhado; rec += r.v_recebido || 0; liq += r.v_liquidado; pag += r.v_pago;
             blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; 
             a_liq += r.v_a_liquidar; a_pag += r.v_a_pagar; 
         });
-        return { global, dif, emp, liq, pag, blo, can, exe, a_liq, a_pag };
+        return { global, dif, emp, rec, liq, pag, blo, can, exe, a_liq, a_pag, p_rec: emp ? rec / emp : 0 };
     }, [filteredData]);
 
     const kpis = useMemo(() => {
@@ -1564,14 +1671,19 @@ function Dashboard() {
         const map = {};
         const dataToProcess = filterCustom ? filteredData.filter(filterCustom) : filteredData;
         dataToProcess.forEach(item => {
-            let val = item[key] && item[key] !== "-" ? item[key] : "N/I";
+            const rawDimension = item[key];
+            let val = Array.isArray(rawDimension)
+                ? (rawDimension.length ? rawDimension.join(' / ') : "N/I")
+                : (rawDimension && rawDimension !== "-" ? rawDimension : "N/I");
             if (key === 'situacao') {
                 const mainTag = item.situacaoFlags.find(f => !['CAN','BLOQ'].includes(f.label));
                 val = mainTag ? mainTag.label : val;
             }
-            if (!map[val]) map[val] = { label: val, count: 0, total: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0 };
+            if (!map[val]) map[val] = { label: val, count: 0, total: 0, recebido: 0, a_receber: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0 };
             map[val].count += 1; 
             map[val].total += item.v_empenhado;
+            map[val].recebido += item.v_recebido || 0;
+            map[val].a_receber += (item.v_empenhado || 0) - (item.v_recebido || 0);
             map[val].liquidado += item.v_liquidado;
             map[val].a_liquidar += item.v_a_liquidar;
             map[val].pago += item.v_pago;
@@ -1588,6 +1700,8 @@ function Dashboard() {
     const compraData = getPieDataFull('compra');
     const fornData = getPieDataFull('fornecedor');
     const anoVigIniData = getPieDataFull('ano_vig_ini');
+    const aoCodigoData = getPieDataFull('ao_codigo_values');
+    const ndCodigoData = getPieDataFull('nd_codigo_values');
     
     // Gráficos Situação restritos a apenas as 7 TAGS
     const allowedSitTags = ['ATIVO INEXEC', 'ATIVO EM EXEC', 'ATIVO EXEC TOT', 'ATIVO EXEC PARC', 'VENC INEXEC TOT', 'VENC EXEC TOT', 'VENC EXEC PARC'];
@@ -1764,6 +1878,8 @@ function Dashboard() {
         if (masterVisibleCols.difGlobal) cols.push({ header: "GLOBAL-EMP", key: "dif_global", isCurrency: true });
         if (masterVisibleCols.vGlobal) cols.push({ header: "GLOBAL", key: "v_global", isCurrency: true });
         if (masterVisibleCols.empenhado) cols.push({ header: "EMPENHADO", key: "v_empenhado", isCurrency: true });
+        if (masterVisibleCols.recebido) cols.push({ header: "RECEBIDO", key: "v_recebido", isCurrency: true });
+        if (masterVisibleCols.pRecebido) cols.push({ header: "RCB %", key: "p_recebido", isPercent: true });
         if (masterVisibleCols.liquidado) cols.push({ header: "LIQUIDADO", key: "v_liquidado", isCurrency: true });
         if (masterVisibleCols.pLiquidado) cols.push({ header: "LIQ %", key: "p_liquidado", isPercent: true });
         if (masterVisibleCols.aLiquidar) cols.push({ header: "A LIQUIDAR", key: "v_a_liquidar", isCurrency: true });
@@ -1810,8 +1926,21 @@ function Dashboard() {
                 </div>
             </header>
 
+            <nav className="max-w-[1600px] mx-auto mb-6 grid grid-cols-1 sm:grid-cols-3 gap-2 bg-white p-2 rounded-2xl shadow-sm border border-slate-200" aria-label="Páginas do dashboard">
+                {[
+                    { id: 1, label: 'PÁGINA 1', detail: 'KPIs e Estatísticas' },
+                    { id: 2, label: 'PÁGINA 2', detail: 'KPIs e Gráficos' },
+                    { id: 3, label: 'PÁGINA 3', detail: 'KPIs e Tabelas' }
+                ].map(page => (
+                    <button key={page.id} onClick={() => setActivePage(page.id)} className={`px-4 py-3 rounded-xl text-left transition border ${activePage === page.id ? 'bg-blue-700 text-white border-blue-700 shadow-md' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'}`} aria-current={activePage === page.id ? 'page' : undefined}>
+                        <span className="block text-[11px] font-black tracking-widest">{page.label}</span>
+                        <span className={`block text-[9px] font-bold mt-0.5 ${activePage === page.id ? 'text-blue-100' : 'text-slate-400'}`}>{page.detail}</span>
+                    </button>
+                ))}
+            </nav>
+
+            <CollapsibleSection title="FILTROS DINÂMICOS (INTEGRADOS)" defaultOpen={true} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto mb-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                <h2 className="text-xs font-black uppercase tracking-widest text-[#99bbd4] mb-4">Filtros Dinâmicos</h2>
                 <div className="mb-4 pb-4 border-b border-slate-100 flex flex-col gap-3">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações Rápidas (Tempo e Status):</span>
                     <div className="flex flex-wrap gap-2 items-center">
@@ -1845,20 +1974,15 @@ function Dashboard() {
                     <MultiSelect label="Nº COMPRA" options={filterOptions.compra} selected={fCompra} onChange={setFCompra} />
                     <MultiSelect label="MODALIDADE" options={filterOptions.modalidade} selected={fModalidade} onChange={setFModalidade} />
                     <MultiSelect label="FORNECEDOR" options={filterOptions.fornecedor} selected={fFornecedor} onChange={setFFornecedor} />
-                </div>
-                <div className="budget-filter-block mb-4">
-                    <p className="budget-filter-title">Classificação Orçamentária</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-                        <MultiSelect label="AO CÓDIGO" options={filterOptions.ao_codigo_values} selected={fAoCodigo} onChange={setFAoCodigo} />
-                        <MultiSelect label="AO NOME" options={filterOptions.ao_nome_values} selected={fAoNome} onChange={setFAoNome} />
-                        <MultiSelect label="PO CÓDIGO" options={filterOptions.po_codigo_values} selected={fPoCodigo} onChange={setFPoCodigo} />
-                        <MultiSelect label="PO NOME" options={filterOptions.po_nome_values} selected={fPoNome} onChange={setFPoNome} />
-                        <MultiSelect label="PTRES" options={filterOptions.ptres_values} selected={fPtres} onChange={setFPtres} />
-                        <MultiSelect label="PI COD" options={filterOptions.pi_cod_values} selected={fPiCod} onChange={setFPiCod} />
-                        <MultiSelect label="PI NOME" options={filterOptions.pi_nome_values} selected={fPiNome} onChange={setFPiNome} />
-                        <MultiSelect label="ND CÓDIGO" options={filterOptions.nd_codigo_values} selected={fNdCodigo} onChange={setFNdCodigo} />
-                        <MultiSelect label="ND NOME" options={filterOptions.nd_nome_values} selected={fNdNome} onChange={setFNdNome} />
-                    </div>
+                    <MultiSelect label="AO CÓDIGO" options={filterOptions.ao_codigo_values} selected={fAoCodigo} onChange={setFAoCodigo} />
+                    <MultiSelect label="AO NOME" options={filterOptions.ao_nome_values} selected={fAoNome} onChange={setFAoNome} />
+                    <MultiSelect label="PO CÓDIGO" options={filterOptions.po_codigo_values} selected={fPoCodigo} onChange={setFPoCodigo} />
+                    <MultiSelect label="PO NOME" options={filterOptions.po_nome_values} selected={fPoNome} onChange={setFPoNome} />
+                    <MultiSelect label="PTRES" options={filterOptions.ptres_values} selected={fPtres} onChange={setFPtres} />
+                    <MultiSelect label="PI COD" options={filterOptions.pi_cod_values} selected={fPiCod} onChange={setFPiCod} />
+                    <MultiSelect label="PI NOME" options={filterOptions.pi_nome_values} selected={fPiNome} onChange={setFPiNome} />
+                    <MultiSelect label="ND CÓDIGO" options={filterOptions.nd_codigo_values} selected={fNdCodigo} onChange={setFNdCodigo} />
+                    <MultiSelect label="ND NOME" options={filterOptions.nd_nome_values} selected={fNdNome} onChange={setFNdNome} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                     <DateInput label="INÍCIO (DE)" value={dInicDe} onChange={setDInicDe} />
@@ -1867,6 +1991,7 @@ function Dashboard() {
                     <DateInput label="FIM (ATÉ)" value={dFimAte} onChange={setDFimAte} />
                 </div>
             </div>
+            </CollapsibleSection>
 
             <div className="max-w-[1600px] mx-auto flex justify-end mb-3">
                 <button onClick={toggleAllSections} className="text-[11px] font-black text-white bg-slate-800 px-5 py-3 rounded-xl shadow-lg hover:bg-slate-700 transition uppercase tracking-wider">
@@ -1899,6 +2024,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
             </div>
             </CollapsibleSection>
 
+            {activePage === 1 && (
             <CollapsibleSection title="ESTATÍSTICAS" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -1951,8 +2077,18 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                 <ToggleableChartCard id="pSitQ" title="QTD Contratos (Situação)" data={situacaoData} isFinancial={false} />
             </div>
 
-            </CollapsibleSection>
+            {/* GRÁFICOS POR CLASSIFICAÇÃO ORÇAMENTÁRIA */}
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
+                <ToggleableChartCard id="pAoCodigoV" title="Empenhado (AO Código)" data={aoCodigoData} isFinancial={true} />
+                <ToggleableChartCard id="pAoCodigoQ" title="QTD Contratos (AO Código)" data={aoCodigoData} isFinancial={false} />
+                <ToggleableChartCard id="pNdCodigoV" title="Empenhado (ND Código)" data={ndCodigoData} isFinancial={true} />
+                <ToggleableChartCard id="pNdCodigoQ" title="QTD Contratos (ND Código)" data={ndCodigoData} isFinancial={false} />
+            </div>
 
+            </CollapsibleSection>
+            )}
+
+            {activePage === 2 && (
             <CollapsibleSection title="GRÁFICOS DE EXECUÇÃO" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
             {/* TOP 20: EXECUÇÃO ORÇAMENTÁRIA */}
             <div className="max-w-[1600px] mx-auto mb-10">
@@ -2282,7 +2418,9 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
             </div>
 
             </CollapsibleSection>
+            )}
 
+            {activePage === 3 && (
             <CollapsibleSection title="TABELAS DE EXECUÇÃO" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden mb-10">
                 <div className="bg-slate-800 px-4 py-3 flex justify-between items-center flex-wrap gap-2">
@@ -2312,15 +2450,15 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                     </div>
                 </div>
                 <div className="overflow-x-auto h-[600px]">
-                    <table className="w-full text-left text-[10px] border-collapse relative" style={{ tableLayout: 'fixed', minWidth: '2400px' }}>
+                    <table ref={financeTableRef} className="finance-detail-table text-left text-[10px] border-collapse relative">
                         <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 shadow-sm z-10">
                             <tr className="text-slate-600 uppercase font-black tracking-tighter align-top">
-                                {masterVisibleCols.contrato && <TextHeader widthClass="w-[7%]" label="Contrato" field="contrato" current={sortConfig} onSort={handleSort} searchVal={searchContrato} onSearchChange={setSearchContrato} />}
-                                {masterVisibleCols.situacao && <TextHeader widthClass="w-[6%]" label="Situação" field="situacao" current={sortConfig} onSort={handleSort} searchVal={searchSituacao} onSearchChange={setSearchSituacao} />}
-                                {masterVisibleCols.secLog && <TextHeader widthClass="w-[5%]" label="SEC LOG" field="sec_log" current={sortConfig} onSort={handleSort} searchVal={searchSecLog} onSearchChange={setSearchSecLog} />}
-                                {masterVisibleCols.fornecedor && <TextHeader widthClass="w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />}
-                                {masterVisibleCols.objeto && <TextHeader widthClass="w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />}
-                                {masterVisibleCols.gestorFiscal && <TextHeader widthClass="w-[7%]" label="Gestores/Fiscais" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />}
+                                {masterVisibleCols.contrato && <TextHeader widthClass="master-text-col w-[7%]" label="Contrato" field="contrato" current={sortConfig} onSort={handleSort} searchVal={searchContrato} onSearchChange={setSearchContrato} />}
+                                {masterVisibleCols.situacao && <TextHeader widthClass="master-text-col w-[6%]" label="Situação" field="situacao" current={sortConfig} onSort={handleSort} searchVal={searchSituacao} onSearchChange={setSearchSituacao} />}
+                                {masterVisibleCols.secLog && <TextHeader widthClass="master-text-col w-[5%]" label="SEC LOG" field="sec_log" current={sortConfig} onSort={handleSort} searchVal={searchSecLog} onSearchChange={setSearchSecLog} />}
+                                {masterVisibleCols.fornecedor && <TextHeader widthClass="master-text-col w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />}
+                                {masterVisibleCols.objeto && <TextHeader widthClass="master-text-col w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />}
+                                {masterVisibleCols.gestorFiscal && <TextHeader widthClass="master-text-col w-[7%]" label="Gestores/Fiscais" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />}
                                 {masterVisibleCols.dataInic && <DateFilterHeader widthClass="w-[5%]" label="Início" field="data_inic" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />}
                                 {masterVisibleCols.dataFim && <DateFilterHeader widthClass="w-[5%]" label="Fim" field="data_fim" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />}
                                 {masterVisibleCols.percTempo && <NumericHeader widthClass="w-[6%]" label="% Tempo" field="perc_tempo" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
@@ -2329,6 +2467,8 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 {masterVisibleCols.difGlobal && <NumericHeader widthClass="w-[6%]" label="GLOBAL-EMP" field="dif_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
                                 {masterVisibleCols.vGlobal && <NumericHeader widthClass="w-[6%]" label="Global" field="v_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
                                 {masterVisibleCols.empenhado && <NumericHeader widthClass="w-[6%]" label="Empenhado" field="v_empenhado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.recebido && <NumericHeader widthClass="w-[6%]" label="Recebido" field="v_recebido" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
+                                {masterVisibleCols.pRecebido && <NumericHeader widthClass="w-[4%]" label="RCB %" field="p_recebido" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
                                 {masterVisibleCols.liquidado && <NumericHeader widthClass="w-[6%]" label="Liquidado" field="v_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
                                 {masterVisibleCols.pLiquidado && <NumericHeader widthClass="w-[4%]" label="Liq %" field="p_liquidado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
                                 {masterVisibleCols.aLiquidar && <NumericHeader widthClass="w-[6%]" label="A Liquidar" field="v_a_liquidar" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
@@ -2350,21 +2490,21 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                         <tbody className="divide-y divide-slate-100">
                             {filteredData.slice(0, 100).map((row, i) => (
                                 <tr key={i} className="hover:bg-blue-50 transition-colors">
-                                    {masterVisibleCols.contrato && <td className="p-3 font-black text-slate-800 break-words">
+                                    {masterVisibleCols.contrato && <td className="master-text-col p-3 font-black text-slate-800 break-words">
                                         {row.contrato}
                                         <div className="text-[8px] font-normal text-slate-500 mt-1 leading-tight">Compra: {row.compra}<br/>Mod: {row.modalidade}</div>
                                     </td>}
-                                    {masterVisibleCols.situacao && <td className="p-3 align-top">
+                                    {masterVisibleCols.situacao && <td className="master-text-col p-3 align-top">
                                         <div className="flex flex-wrap gap-1">
                                             {row.situacaoFlags.map((f, idx) => (
                                                 <span key={idx} className={`text-[8px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${f.color}`}>{f.label}</span>
                                             ))}
                                         </div>
                                     </td>}
-                                    {masterVisibleCols.secLog && <td className="p-3 text-slate-600 font-black break-words">{row.sec_log}</td>}
-                                    {masterVisibleCols.fornecedor && <td className="p-3 text-slate-600 font-bold break-words">{row.fornecedor}</td>}
-                                    {masterVisibleCols.objeto && <td className="p-3 text-slate-500 break-words">{row.objeto}</td>}
-                                    {masterVisibleCols.gestorFiscal && <td className="p-3 break-words">
+                                    {masterVisibleCols.secLog && <td className="master-text-col p-3 text-slate-600 font-black break-words">{row.sec_log}</td>}
+                                    {masterVisibleCols.fornecedor && <td className="master-text-col p-3 text-slate-600 font-bold break-words">{row.fornecedor}</td>}
+                                    {masterVisibleCols.objeto && <td className="master-text-col p-3 text-slate-500 break-words">{row.objeto}</td>}
+                                    {masterVisibleCols.gestorFiscal && <td className="master-text-col p-3 break-words">
                                         <div className="font-bold text-slate-700" title="Gestor Titular">GT: {row.gestor}</div>
                                         {row.gestor_sub !== 'N/I' && <div className="text-[9px] text-slate-500" title="Gestor Substituto">GS: {row.gestor_sub}</div>}
                                         <div className="font-bold text-slate-700 mt-1" title="Fiscal Titular">FT: {row.fiscal}</div>
@@ -2378,6 +2518,8 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                     {masterVisibleCols.difGlobal && <td className={`p-3 text-right font-bold ${row.dif_global < 0 ? 'text-red-500' : (row.dif_global > 0 ? 'text-emerald-600' : 'text-slate-500')} bg-slate-50/30`}>{formatBRL(row.dif_global)}</td>}
                                     {masterVisibleCols.vGlobal && <td className="p-3 text-right font-bold text-slate-700 bg-slate-50/30">{formatBRL(row.v_global)}</td>}
                                     {masterVisibleCols.empenhado && <td className="p-3 text-right font-bold text-blue-700">{formatBRL(row.v_empenhado)}</td>}
+                                    {masterVisibleCols.recebido && <td className="p-3 text-right font-bold text-violet-700">{formatBRL(row.v_recebido)}</td>}
+                                    {masterVisibleCols.pRecebido && <td className="p-3 text-center font-bold text-violet-700 bg-violet-50/30">{formatPercentBR(row.p_recebido)}</td>}
                                     {masterVisibleCols.liquidado && <td className="p-3 text-right font-bold text-amber-600">{formatBRL(row.v_liquidado)}</td>}
                                     {masterVisibleCols.pLiquidado && <td className="p-3 text-center font-bold opacity-70 bg-slate-50/50">{formatPercentBR(row.p_liquidado)}</td>}
                                     {masterVisibleCols.aLiquidar && <td className="p-3 text-right font-bold text-amber-500">{formatBRL(row.v_a_liquidar)}</td>}
@@ -2399,10 +2541,12 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                         </tbody>
                         <tfoot className="bg-slate-200 sticky bottom-0 border-t-2 border-slate-400 shadow-md z-10">
                             <tr className="text-slate-800 uppercase font-black">
-                                {masterNonMetricColCount > 0 && <td colSpan={masterNonMetricColCount} className="p-3 text-right">TOTAIS (Filtro Atual):</td>}
+                                {masterNonMetricColCount > 0 && <td colSpan={masterNonMetricColCount} className="master-text-col p-3 text-right">TOTAIS (Filtro Atual):</td>}
                                 {masterVisibleCols.difGlobal && <td className="p-3 text-right text-slate-700">{formatBRL(totalsMaster.dif)}</td>}
                                 {masterVisibleCols.vGlobal && <td className="p-3 text-right text-slate-700">{formatBRL(totalsMaster.global)}</td>}
                                 {masterVisibleCols.empenhado && <td className="p-3 text-right text-blue-800">{formatBRL(totalsMaster.emp)}</td>}
+                                {masterVisibleCols.recebido && <td className="p-3 text-right text-violet-800">{formatBRL(totalsMaster.rec)}</td>}
+                                {masterVisibleCols.pRecebido && <td className="p-3 text-center text-violet-800">{formatPercentBR(totalsMaster.p_rec)}</td>}
                                 {masterVisibleCols.liquidado && <td className="p-3 text-right text-amber-800">{formatBRL(totalsMaster.liq)}</td>}
                                 {masterVisibleCols.pLiquidado && <td className="p-3 text-center">-</td>}
                                 {masterVisibleCols.aLiquidar && <td className="p-3 text-right text-amber-600">{formatBRL(totalsMaster.a_liq)}</td>}
@@ -2425,6 +2569,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                 </div>
             </div>
             </CollapsibleSection>
+            )}
         </div>
     );
 }

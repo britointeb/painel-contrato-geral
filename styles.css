@@ -1,18 +1,19 @@
 /* Estilização Premium para as Barras de Scroll */
 body { font-family: 'Outfit', sans-serif; }
-.budget-filter-block {
-    padding: 1rem;
-    border: 1px solid #e2e8f0;
-    border-radius: 0.875rem;
-    background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+
+/* Autofit: as colunas de INÍCIO em diante usam apenas a largura necessária. */
+.finance-detail-table {
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
 }
-.budget-filter-title {
-    margin: 0 0 0.75rem;
-    color: #64748b;
-    font-size: 0.625rem;
-    font-weight: 900;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+.finance-detail-table th:not(.master-text-col),
+.finance-detail-table td:not(.master-text-col) {
+    width: 1%;
+    white-space: nowrap;
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+    font-variant-numeric: tabular-nums;
 }
 ::-webkit-scrollbar { height: 8px; width: 8px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
