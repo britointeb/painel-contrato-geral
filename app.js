@@ -279,6 +279,12 @@ const parsePercentAsFloat = (val) => {
 const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0);
 const formatPercentBR = (v) => new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0);
 
+const getFornecedorCnpj = (fornecedor) => {
+    const identifier = String(fornecedor || '').split(/\s+-\s+/)[0];
+    const digits = identifier.replace(/\D/g, '');
+    return digits.length >= 14 ? digits.slice(0, 14) : '';
+};
+
 const shortenNumber = (num) => {
     if (!num) return "0";
     if (num >= 1e9) return (num / 1e9).toFixed(1).replace('.', ',') + ' Bi';
@@ -476,19 +482,23 @@ const getFullTooltipContrato = (dataArray) => ({
     }
 });
 
-const getBubbleTooltip = (xAxisMetricStr) => ({
+const getBubbleTooltip = () => ({
     callbacks: {
         title: function(tooltipItems) {
             return `Contrato: ${tooltipItems[0].raw.contrato}`;
         },
         label: function(context) {
             const d = context.raw;
+            const percentOfCommitted = (value) => d.v_empenhado ? formatPercentBR(value / d.v_empenhado) : '0,0%';
             return [
+                `Objeto: ${d.objeto}`,
                 `Fornecedor: ${d.fornecedor}`,
                 `Situação: ${d.situacao}`,
                 `Empenhado: ${formatBRL(d.v_empenhado)}`,
-                `${xAxisMetricStr}: ${formatPercentBR(d.x / 100)}`,
-                `% Tempo: ${formatPercentBR(d.y / 100)}`
+                `Recebido: ${formatBRL(d.v_recebido)} (${percentOfCommitted(d.v_recebido)})`,
+                `Liquidado: ${formatBRL(d.v_liquidado)} (${percentOfCommitted(d.v_liquidado)})`,
+                `Pago: ${formatBRL(d.v_pago)} (${percentOfCommitted(d.v_pago)})`,
+                `% Tempo: ${formatPercentBR(d.perc_tempo)}`
             ];
         }
     }
@@ -895,7 +905,7 @@ function MultiSelect({ label, options, selected, onChange }) {
     return (
         <div className="relative" ref={ref}>
             <label className="text-[9px] font-black text-slate-400 block mb-1 uppercase tracking-widest">{label}</label>
-            <div className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs font-bold text-slate-700 cursor-pointer flex justify-between items-center shadow-sm" onClick={() => setIsOpen(!isOpen)}>
+            <div className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-xs font-bold text-slate-700 cursor-pointer flex justify-between items-center shadow-sm" onClick={() => setIsOpen(!isOpen)} title={selected.length ? selected.join('\n') : 'TODOS OS REGISTROS'}>
                 <span className="truncate">{selected.length === 0 ? "TODOS OS REGISTROS" : `${selected.length} selecionado(s)`}</span>
                 <span className="text-[10px]">▼</span>
             </div>
@@ -913,7 +923,7 @@ function MultiSelect({ label, options, selected, onChange }) {
                         {filteredOptions.map((o, i) => (
                             <label key={i} className="flex items-center px-2 py-2 hover:bg-blue-50 cursor-pointer text-[10px] font-bold text-slate-700 border-b border-slate-100 last:border-0">
                                 <input type="checkbox" checked={selected.includes(o)} onChange={() => toggleOption(o)} className="mr-2 cursor-pointer" />
-                                <span className="truncate leading-tight">{o}</span>
+                                <span className="truncate leading-tight" title={o}>{o}</span>
                             </label>
                         ))}
                     </div>
@@ -971,6 +981,9 @@ function Dashboard() {
     const [top20100Sort, setTop20100Sort] = useState('emp_desc');
     const [top20100ViewMode, setTop20100ViewMode] = useState('fornecedor');
 
+    const [gestorChartSort, setGestorChartSort] = useState('emp_tit');
+    const [fiscalChartSort, setFiscalChartSort] = useState('emp_tit');
+
     const [fornecedorSort, setFornecedorSort] = useState('valor_desc');
     const [contratoSort, setContratoSort] = useState('valor_desc');
     const [scatterXAxis, setScatterXAxis] = useState('p_executado');
@@ -986,15 +999,11 @@ function Dashboard() {
     const [fCompra, setFCompra] = useState([]); 
     const [fModalidade, setFModalidade] = useState([]);
     const [fFornecedor, setFFornecedor] = useState([]);
-    const [fAoCodigo, setFAoCodigo] = useState([]);
-    const [fAoNome, setFAoNome] = useState([]);
-    const [fPoCodigo, setFPoCodigo] = useState([]);
-    const [fPoNome, setFPoNome] = useState([]);
+    const [fAo, setFAo] = useState([]);
+    const [fPo, setFPo] = useState([]);
     const [fPtres, setFPtres] = useState([]);
-    const [fPiCod, setFPiCod] = useState([]);
-    const [fPiNome, setFPiNome] = useState([]);
-    const [fNdCodigo, setFNdCodigo] = useState([]);
-    const [fNdNome, setFNdNome] = useState([]);
+    const [fPi, setFPi] = useState([]);
+    const [fNd, setFNd] = useState([]);
     
     const [dInicDe, setDInicDe] = useState("");
     const [dInicAte, setDInicAte] = useState("");
@@ -1015,6 +1024,7 @@ function Dashboard() {
     const financeTableRef = useRef(null);
     const masterColumnLabels = {
         contrato: "CONTRATO", situacao: "SITUAÇÃO", secLog: "SEC LOG", fornecedor: "FORNECEDOR", objeto: "OBJETO", gestorFiscal: "GESTORES/FISCAIS",
+        ao: "AO", po: "PO", nd: "ND",
         dataInic: "INÍCIO", dataFim: "FIM", percTempo: "% TEMPO", diasPassaram: "PASSARAM", encerrandoDias: "FALTAM",
         difGlobal: "GLOBAL-EMP", vGlobal: "GLOBAL", empenhado: "EMPENHADO", recebido: "RECEBIDO", pRecebido: "RCB %", liquidado: "LIQUIDADO", pLiquidado: "LIQ %",
         aLiquidar: "A LIQUIDAR", pALiquidar: "A LIQ %", pago: "PAGO", pPago: "PAGO %", aPagar: "A PAGAR", pAPagar: "A PAGAR %",
@@ -1023,6 +1033,7 @@ function Dashboard() {
     };
     const [masterVisibleCols, setMasterVisibleCols] = useState({
         contrato: true, situacao: true, secLog: true, fornecedor: true, objeto: true, gestorFiscal: true,
+        ao: true, po: true, nd: true,
         dataInic: true, dataFim: true, percTempo: true, diasPassaram: true, encerrandoDias: true,
         difGlobal: true, vGlobal: true, empenhado: true, recebido: true, pRecebido: true, liquidado: true, pLiquidado: true,
         aLiquidar: true, pALiquidar: true, pago: true, pPago: true, aPagar: true, pAPagar: true,
@@ -1062,7 +1073,7 @@ function Dashboard() {
 
     const clearAllFilters = () => {
         setFFiscal([]); setFGestor([]); setFFiscalSub([]); setFGestorSub([]); setFSecLog([]); setFContrato([]); setFCompra([]); setFModalidade([]); setFFornecedor([]);
-        setFAoCodigo([]); setFAoNome([]); setFPoCodigo([]); setFPoNome([]); setFPtres([]); setFPiCod([]); setFPiNome([]); setFNdCodigo([]); setFNdNome([]);
+        setFAo([]); setFPo([]); setFPtres([]); setFPi([]); setFNd([]);
         setDInicDe(""); setDInicAte(""); setDFimDe(""); setDFimAte("");
         setSearchContrato(""); setSearchSituacao(""); setSearchSecLog(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
         setFSituacaoTags([]);
@@ -1149,14 +1160,26 @@ function Dashboard() {
 
         const createAccumulator = () => ({
             ao_codigo_values: new Set(), ao_nome_values: new Set(),
+            ao_filter_values: new Set(),
             po_codigo_values: new Set(), po_nome_values: new Set(),
+            po_filter_values: new Set(),
             ptres_values: new Set(), pi_cod_values: new Set(),
-            pi_nome_values: new Set(), nd_codigo_values: new Set(), nd_nome_values: new Set()
+            pi_nome_values: new Set(), pi_filter_values: new Set(),
+            nd_codigo_values: new Set(), nd_nome_values: new Set(), nd_filter_values: new Set()
         });
 
         const addValue = (accumulator, key, value) => {
             const normalizedValue = (value || '').toString().trim().toUpperCase();
             if (normalizedValue && normalizedValue !== '-') accumulator[key].add(normalizedValue);
+        };
+
+        const addNameCodePair = (accumulator, key, name, code) => {
+            const normalizedName = (name || '').toString().trim().toUpperCase();
+            const normalizedCode = (code || '').toString().trim().toUpperCase();
+            if ((!normalizedName || normalizedName === '-') && (!normalizedCode || normalizedCode === '-')) return;
+            accumulator[key].add(normalizedName && normalizedName !== '-'
+                ? `${normalizedName} – ${normalizedCode && normalizedCode !== '-' ? normalizedCode : 'N/I'}`
+                : normalizedCode);
         };
 
         orcamentarioRows.slice(1).forEach(row => {
@@ -1170,15 +1193,28 @@ function Dashboard() {
 
             if (!result[contrato]) result[contrato] = createAccumulator();
             const target = result[contrato];
-            addValue(target, 'ao_codigo_values', getValue(row, ['Ação Governo Código', 'AO Código', 'AO Codigo'], ['acao governo codigo']));
-            addValue(target, 'ao_nome_values', getValue(row, ['Ação Governo Nome', 'AO Nome'], ['acao governo nome']));
-            addValue(target, 'po_codigo_values', getValue(row, ['Plano Orçamentário Código PO', 'PO Código', 'PO Codigo'], ['plano orcamentario codigo po']));
-            addValue(target, 'po_nome_values', getValue(row, ['Plano Orçamentário Nome', 'PO Nome'], ['plano orcamentario nome']));
+            const aoCodigo = getValue(row, ['Ação Governo Código', 'AO Código', 'AO Codigo'], ['acao governo codigo']);
+            const aoNome = getValue(row, ['Ação Governo Nome', 'AO Nome'], ['acao governo nome']);
+            const poCodigo = getValue(row, ['Plano Orçamentário Código PO', 'PO Código', 'PO Codigo'], ['plano orcamentario codigo po']);
+            const poNome = getValue(row, ['Plano Orçamentário Nome', 'PO Nome'], ['plano orcamentario nome']);
+            const piCodigo = getValue(row, ['PI Código PI', 'PI Código', 'PI Codigo'], ['pi codigo pi']);
+            const piNome = getValue(row, ['PI Nome'], ['pi nome']);
+            const ndCodigo = getValue(row, ['ND_DOC', 'ND Código', 'ND Codigo'], ['nd doc']);
+            const ndNome = getValue(row, ['ND_NOME', 'ND Nome'], ['nd nome']);
+
+            addValue(target, 'ao_codigo_values', aoCodigo);
+            addValue(target, 'ao_nome_values', aoNome);
+            addNameCodePair(target, 'ao_filter_values', aoNome, aoCodigo);
+            addValue(target, 'po_codigo_values', poCodigo);
+            addValue(target, 'po_nome_values', poNome);
+            addNameCodePair(target, 'po_filter_values', poNome, poCodigo);
             addValue(target, 'ptres_values', getValue(row, ['PTRES Código', 'PTRES Codigo', 'PTRES'], ['ptres codigo', 'ptres']));
-            addValue(target, 'pi_cod_values', getValue(row, ['PI Código PI', 'PI Código', 'PI Codigo'], ['pi codigo pi']));
-            addValue(target, 'pi_nome_values', getValue(row, ['PI Nome'], ['pi nome']));
-            addValue(target, 'nd_codigo_values', getValue(row, ['ND_DOC', 'ND Código', 'ND Codigo'], ['nd doc']));
-            addValue(target, 'nd_nome_values', getValue(row, ['ND_NOME', 'ND Nome'], ['nd nome']));
+            addValue(target, 'pi_cod_values', piCodigo);
+            addValue(target, 'pi_nome_values', piNome);
+            addNameCodePair(target, 'pi_filter_values', piNome, piCodigo);
+            addValue(target, 'nd_codigo_values', ndCodigo);
+            addValue(target, 'nd_nome_values', ndNome);
+            addNameCodePair(target, 'nd_filter_values', ndNome, ndCodigo);
         });
 
         Object.values(result).forEach(accumulator => {
@@ -1191,8 +1227,10 @@ function Dashboard() {
     };
 
     const emptyOrcamentario = () => ({
-        ao_codigo_values: [], ao_nome_values: [], po_codigo_values: [], po_nome_values: [],
-        ptres_values: [], pi_cod_values: [], pi_nome_values: [], nd_codigo_values: [], nd_nome_values: []
+        ao_codigo_values: [], ao_nome_values: [], ao_filter_values: [],
+        po_codigo_values: [], po_nome_values: [], po_filter_values: [],
+        ptres_values: [], pi_cod_values: [], pi_nome_values: [], pi_filter_values: [],
+        nd_codigo_values: [], nd_nome_values: [], nd_filter_values: []
     });
 
     const normalizeContractKey = (value) => String(value || '')
@@ -1302,6 +1340,7 @@ function Dashboard() {
             const v_bloqueado = parseValue(getVal(["TOTAL BLOQUEADO"]));
             const contrato = (getVal(["Número Contrato", "numero_contrato", "COL_NR_CONTR_BASE"]) || "-").toUpperCase();
             const v_recebido = recebidoByContrato[normalizeContractKey(contrato)] || 0;
+            const orcamentario = orcamentarioByContrato[contrato] || emptyOrcamentario();
 
             const v_a_liquidar = v_empenhado - v_liquidado - v_cancelado - v_bloqueado;
             const v_a_pagar = v_empenhado - v_pago - v_cancelado - v_bloqueado;
@@ -1311,7 +1350,10 @@ function Dashboard() {
 
             return {
                 contrato,
-                ...(orcamentarioByContrato[contrato] || emptyOrcamentario()),
+                ...orcamentario,
+                ao_codigos: orcamentario.ao_codigo_values.join('; ') || '-',
+                po_codigos: orcamentario.po_codigo_values.join('; ') || '-',
+                nd_codigos: orcamentario.nd_codigo_values.join('; ') || '-',
                 fornecedor: (getVal(["Fornecedor"]) || "-").toUpperCase(),
                 objeto: (getVal(["Objeto"]) || "-").toUpperCase(),
                 fiscal: (getVal(["FISCAL_TITULAR", "Fiscal Titular"]) || "N/I").toUpperCase(),
@@ -1452,7 +1494,7 @@ function Dashboard() {
 
     const filterOptions = useMemo(() => {
         const scalarFields = ['fiscal', 'gestor', 'fiscal_sub', 'gestor_sub', 'sec_log', 'contrato', 'compra', 'modalidade', 'fornecedor'];
-        const arrayFields = ['ao_codigo_values', 'ao_nome_values', 'po_codigo_values', 'po_nome_values', 'ptres_values', 'pi_cod_values', 'pi_nome_values', 'nd_codigo_values', 'nd_nome_values'];
+        const arrayFields = ['ao_filter_values', 'po_filter_values', 'ptres_values', 'pi_filter_values', 'nd_filter_values'];
         const accumulators = {};
         [...scalarFields, ...arrayFields].forEach(field => { accumulators[field] = new Set(); });
 
@@ -1488,15 +1530,11 @@ function Dashboard() {
             const mMod = fModalidade.length === 0 || fModalidade.includes(item.modalidade);
             const matchesOrcamentario = (selected, field) => selected.length === 0 ||
                 selected.some(value => (Array.isArray(item[field]) ? item[field] : []).includes(value));
-            const mAoCodigo = matchesOrcamentario(fAoCodigo, 'ao_codigo_values');
-            const mAoNome = matchesOrcamentario(fAoNome, 'ao_nome_values');
-            const mPoCodigo = matchesOrcamentario(fPoCodigo, 'po_codigo_values');
-            const mPoNome = matchesOrcamentario(fPoNome, 'po_nome_values');
+            const mAo = matchesOrcamentario(fAo, 'ao_filter_values');
+            const mPo = matchesOrcamentario(fPo, 'po_filter_values');
             const mPtres = matchesOrcamentario(fPtres, 'ptres_values');
-            const mPiCod = matchesOrcamentario(fPiCod, 'pi_cod_values');
-            const mPiNome = matchesOrcamentario(fPiNome, 'pi_nome_values');
-            const mNdCodigo = matchesOrcamentario(fNdCodigo, 'nd_codigo_values');
-            const mNdNome = matchesOrcamentario(fNdNome, 'nd_nome_values');
+            const mPi = matchesOrcamentario(fPi, 'pi_filter_values');
+            const mNd = matchesOrcamentario(fNd, 'nd_filter_values');
             
             const mDDe = !dInicDe || (item.dtInicVal && item.dtInicVal >= new Date(dInicDe+"T00:00:00").getTime());
             const mDAte = !dInicAte || (item.dtInicVal && item.dtInicVal <= new Date(dInicAte+"T23:59:59").getTime());
@@ -1524,7 +1562,7 @@ function Dashboard() {
                 if (numFilters[key].max !== '' && (key.startsWith('p_') ? item[key]*100 : item[key]) > parseFloat(numFilters[key].max)) { mNum = false; break; }
             }
             return mFisc && mGest && mFiscSub && mGestSub && mSec && mCont && mForn && mCompra && mMod &&
-                mAoCodigo && mAoNome && mPoCodigo && mPoNome && mPtres && mPiCod && mPiNome && mNdCodigo && mNdNome &&
+                mAo && mPo && mPtres && mPi && mNd &&
                 mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sSecLog && sForn && sObj && sGest && mSitTag && mNum;
         });
 
@@ -1543,7 +1581,7 @@ function Dashboard() {
         }
         return filtered;
     }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade,
-        fAoCodigo, fAoNome, fPoCodigo, fPoNome, fPtres, fPiCod, fPiNome, fNdCodigo, fNdNome,
+        fAo, fPo, fPtres, fPi, fNd,
         dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchSecLog, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
 
     // Autofit real das colunas de INÍCIO até a última métrica visível.
@@ -1557,7 +1595,7 @@ function Dashboard() {
                 const columnIndex = header.cellIndex;
                 const cells = [
                     header,
-                    ...Array.from(table.querySelectorAll('tbody tr')).map(row => row.cells[columnIndex]).filter(Boolean)
+                    ...Array.from(table.querySelectorAll('tbody tr, tfoot tr')).map(row => row.cells[columnIndex]).filter(Boolean)
                 ];
 
                 cells.forEach(cell => {
@@ -1566,7 +1604,7 @@ function Dashboard() {
                 });
 
                 const contentWidth = cells.reduce((maxWidth, cell) => Math.max(maxWidth, cell.scrollWidth + 6), 0);
-                const fittedWidth = Math.min(190, Math.max(72, contentWidth));
+                const fittedWidth = Math.max(72, contentWidth);
                 cells.forEach(cell => {
                     cell.style.width = `${fittedWidth}px`;
                     cell.style.minWidth = `${fittedWidth}px`;
@@ -1641,7 +1679,7 @@ function Dashboard() {
         };
     }, [filteredData]);
 
-    const getPersonData = (roleType) => {
+    const getPersonData = (roleType, sortKey) => {
         const map = {};
         filteredData.forEach(item => {
             const tit = item[roleType]; 
@@ -1661,11 +1699,14 @@ function Dashboard() {
                 map[sub].total += emp;
             }
         });
-        return Object.values(map).sort((a, b) => b.total - a.total).slice(0, 10);
+        const values = Object.values(map);
+        if (sortKey === 'nome_asc') values.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+        else values.sort((a, b) => (b[sortKey] || 0) - (a[sortKey] || 0) || a.label.localeCompare(b.label, 'pt-BR'));
+        return values.slice(0, 10);
     };
 
-    const gestorDataProcessed = getPersonData('gestor');
-    const fiscalDataProcessed = getPersonData('fiscal');
+    const gestorDataProcessed = getPersonData('gestor', gestorChartSort);
+    const fiscalDataProcessed = getPersonData('fiscal', fiscalChartSort);
 
     const getPieDataFull = (key, filterCustom = null) => {
         const map = {};
@@ -1713,13 +1754,19 @@ function Dashboard() {
         if (mode === 'ano') return item.ano_vig_ini;
         if (mode === 'modalidade') return item.modalidade;
         if (mode === 'sec_log') return item.sec_log;
+        if (mode === 'ao_codigo') return item.ao_codigo_values?.length ? item.ao_codigo_values.join('; ') : 'N/I';
+        if (mode === 'nd_codigo') return item.nd_codigo_values?.length ? item.nd_codigo_values.join('; ') : 'N/I';
+        if (mode === 'pi_codigo') return item.pi_cod_values?.length ? item.pi_cod_values.join('; ') : 'N/I';
         return item.fornecedor;
     };
 
     const sortTop20Array = (arr, sortKey) => {
         const metricMap = {
             valor_desc: 'total', emp_desc: 'total', rec_desc: 'recebido', liq_desc: 'liquidado', pag_desc: 'pago',
-            can_desc: 'cancelado', bloq_desc: 'bloqueado', aliq_desc: 'a_liquidar', apag_desc: 'a_pagar', qtd_desc: 'count'
+            can_desc: 'cancelado', bloq_desc: 'bloqueado', aliq_desc: 'a_liquidar', apag_desc: 'a_pagar',
+            pemp_desc: 'p_empenhado', prec_desc: 'p_recebido', pliq_desc: 'p_liquidado', ppag_desc: 'p_pago',
+            pcan_desc: 'p_cancelado', pbloq_desc: 'p_bloqueado', paliq_desc: 'p_a_liquidar', papag_desc: 'p_a_pagar',
+            qtd_desc: 'count'
         };
         if (sortKey === 'nome_asc') return arr.sort((a, b) => a.label.localeCompare(b.label));
         if (sortKey === 'nome_desc') return arr.sort((a, b) => b.label.localeCompare(a.label));
@@ -1729,7 +1776,7 @@ function Dashboard() {
 
     const renderTop20SortOptions = () => (
         <>
-            <option value="emp_desc">MAIOR EMPENHO</option>
+            <option value="emp_desc">MAIOR EMPENHADO</option>
             <option value="rec_desc">MAIOR RECEBIDO</option>
             <option value="liq_desc">MAIOR LIQUIDADO</option>
             <option value="pag_desc">MAIOR PAGO</option>
@@ -1737,6 +1784,14 @@ function Dashboard() {
             <option value="bloq_desc">MAIOR BLOQUEADO</option>
             <option value="aliq_desc">MAIOR A LIQUIDAR</option>
             <option value="apag_desc">MAIOR A PAGAR</option>
+            <option value="pemp_desc">MAIOR % EMPENHADO</option>
+            <option value="prec_desc">MAIOR % RECEBIDO</option>
+            <option value="pliq_desc">MAIOR % LIQUIDADO</option>
+            <option value="ppag_desc">MAIOR % PAGO</option>
+            <option value="pcan_desc">MAIOR % CANCELADO</option>
+            <option value="pbloq_desc">MAIOR % BLOQUEADO</option>
+            <option value="paliq_desc">MAIOR % A LIQUIDAR</option>
+            <option value="papag_desc">MAIOR % A PAGAR</option>
             <option value="qtd_desc">MAIOR QTD</option>
             <option value="nome_asc">ORDEM A-Z</option>
         </>
@@ -1746,8 +1801,9 @@ function Dashboard() {
         const map = {};
         filteredData.forEach(item => {
             const key = getTop20Key(item, top20ViewMode);
-            if (!map[key]) map[key] = { label: key, count: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
+            if (!map[key]) map[key] = { label: key, count: 0, global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
             map[key].count += 1; 
+            map[key].global += item.v_global || 0;
             map[key].total += item.v_empenhado;
             map[key].recebido += item.v_recebido || 0;
             map[key].liquidado += item.v_liquidado;
@@ -1758,7 +1814,17 @@ function Dashboard() {
             map[key].cancelado += item.v_cancelado;
             map[key].executado += item.v_executado;
         });
-        let arr = Object.values(map);
+        let arr = Object.values(map).map(item => ({
+            ...item,
+            p_empenhado: item.global ? item.total / item.global : 0,
+            p_recebido: item.total ? item.recebido / item.total : 0,
+            p_liquidado: item.total ? item.liquidado / item.total : 0,
+            p_pago: item.total ? item.pago / item.total : 0,
+            p_cancelado: item.total ? item.cancelado / item.total : 0,
+            p_bloqueado: item.total ? item.bloqueado / item.total : 0,
+            p_a_liquidar: item.total ? Math.max(0, item.a_liquidar) / item.total : 0,
+            p_a_pagar: item.total ? Math.max(0, item.a_pagar) / item.total : 0
+        }));
         sortTop20Array(arr, top20Sort);
         return arr.slice(0, 20); 
     }, [filteredData, top20Sort, top20ViewMode]);
@@ -1768,8 +1834,9 @@ function Dashboard() {
         const map = {};
         filteredData.forEach(item => {
             const key = getTop20Key(item, top20100ViewMode);
-            if (!map[key]) map[key] = { label: key, count: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
+            if (!map[key]) map[key] = { label: key, count: 0, global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
             map[key].count += 1; 
+            map[key].global += item.v_global || 0;
             map[key].total += item.v_empenhado;
             map[key].recebido += item.v_recebido || 0;
             map[key].liquidado += item.v_liquidado;
@@ -1780,7 +1847,17 @@ function Dashboard() {
             map[key].cancelado += item.v_cancelado;
             map[key].executado += item.v_executado;
         });
-        let arr = Object.values(map);
+        let arr = Object.values(map).map(item => ({
+            ...item,
+            p_empenhado: item.global ? item.total / item.global : 0,
+            p_recebido: item.total ? item.recebido / item.total : 0,
+            p_liquidado: item.total ? item.liquidado / item.total : 0,
+            p_pago: item.total ? item.pago / item.total : 0,
+            p_cancelado: item.total ? item.cancelado / item.total : 0,
+            p_bloqueado: item.total ? item.bloqueado / item.total : 0,
+            p_a_liquidar: item.total ? Math.max(0, item.a_liquidar) / item.total : 0,
+            p_a_pagar: item.total ? Math.max(0, item.a_pagar) / item.total : 0
+        }));
         sortTop20Array(arr, top20100Sort);
         return arr.slice(0, 20); 
     }, [filteredData, top20100Sort, top20100ViewMode]);
@@ -1839,8 +1916,13 @@ function Dashboard() {
                 y: Math.min(Math.max((d.perc_tempo || 0) * 100, -10), 110),
                 r: maxEmp > 0 ? Math.max(4, (d.v_empenhado / maxEmp) * 25) : 4,
                 contrato: d.contrato,
+                objeto: d.objeto,
                 fornecedor: d.fornecedor,
                 v_empenhado: d.v_empenhado,
+                v_recebido: d.v_recebido || 0,
+                v_liquidado: d.v_liquidado || 0,
+                v_pago: d.v_pago || 0,
+                perc_tempo: d.perc_tempo || 0,
                 situacao: d.situacao,
                 color: hexColor
             };
@@ -1859,7 +1941,7 @@ function Dashboard() {
     const pQ4 = totalBubbles ? ((q4Otimo / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
 
     const masterNonMetricColCount = [
-        'contrato', 'situacao', 'secLog', 'fornecedor', 'objeto', 'gestorFiscal', 'dataInic', 'dataFim', 'percTempo', 'diasPassaram', 'encerrandoDias'
+        'contrato', 'situacao', 'secLog', 'fornecedor', 'objeto', 'gestorFiscal', 'ao', 'po', 'nd', 'dataInic', 'dataFim', 'percTempo', 'diasPassaram', 'encerrandoDias'
     ].filter(k => masterVisibleCols[k]).length;
 
     const getMasterExportCols = () => {
@@ -1870,6 +1952,9 @@ function Dashboard() {
         if (masterVisibleCols.fornecedor) cols.push({ header: "FORNECEDOR", key: "fornecedor" });
         if (masterVisibleCols.objeto) cols.push({ header: "OBJETO", key: "objeto" });
         if (masterVisibleCols.gestorFiscal) cols.push({ header: "GESTOR/FISCAL", key: "gestor", format: (r) => `GT: ${r.gestor} | GS: ${r.gestor_sub} | FT: ${r.fiscal} | FS: ${r.fiscal_sub}` });
+        if (masterVisibleCols.ao) cols.push({ header: "AO", key: "ao_codigos" });
+        if (masterVisibleCols.po) cols.push({ header: "PO", key: "po_codigos" });
+        if (masterVisibleCols.nd) cols.push({ header: "ND", key: "nd_codigos" });
         if (masterVisibleCols.dataInic) cols.push({ header: "INÍCIO", key: "data_inic" });
         if (masterVisibleCols.dataFim) cols.push({ header: "FIM", key: "data_fim" });
         if (masterVisibleCols.percTempo) cols.push({ header: "% TEMPO", key: "perc_tempo", isPercent: true });
@@ -1913,6 +1998,7 @@ function Dashboard() {
                     <h1 className="text-3xl font-black uppercase tracking-tighter text-slate-800">PAINEL GERAL DE CONTRATOS</h1>
                     <p className={`text-[11px] font-bold mt-1 ${status.includes("Erro") || status.includes("falhou") || status.includes("Falha") ? "text-red-600" : "text-emerald-600"}`}>● {status}</p>
                     <p className="text-[11px] italic text-blue-600 mt-0.5">Produzido por Cel Brito.</p>
+                    <p className="text-[10px] font-black text-slate-500 mt-0.5 uppercase tracking-widest">Versão V19</p>
                 </div>
                 <div className="flex flex-nowrap gap-3 items-center bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm overflow-x-auto max-w-full">
                     <span className="text-[11px] font-black text-slate-400 uppercase tracking-tight whitespace-nowrap">CARGA MANUAL:</span>
@@ -1974,15 +2060,11 @@ function Dashboard() {
                     <MultiSelect label="Nº COMPRA" options={filterOptions.compra} selected={fCompra} onChange={setFCompra} />
                     <MultiSelect label="MODALIDADE" options={filterOptions.modalidade} selected={fModalidade} onChange={setFModalidade} />
                     <MultiSelect label="FORNECEDOR" options={filterOptions.fornecedor} selected={fFornecedor} onChange={setFFornecedor} />
-                    <MultiSelect label="AO CÓDIGO" options={filterOptions.ao_codigo_values} selected={fAoCodigo} onChange={setFAoCodigo} />
-                    <MultiSelect label="AO NOME" options={filterOptions.ao_nome_values} selected={fAoNome} onChange={setFAoNome} />
-                    <MultiSelect label="PO CÓDIGO" options={filterOptions.po_codigo_values} selected={fPoCodigo} onChange={setFPoCodigo} />
-                    <MultiSelect label="PO NOME" options={filterOptions.po_nome_values} selected={fPoNome} onChange={setFPoNome} />
+                    <MultiSelect label="AO NOME – CÓDIGO" options={filterOptions.ao_filter_values} selected={fAo} onChange={setFAo} />
+                    <MultiSelect label="PO NOME – CÓDIGO" options={filterOptions.po_filter_values} selected={fPo} onChange={setFPo} />
                     <MultiSelect label="PTRES" options={filterOptions.ptres_values} selected={fPtres} onChange={setFPtres} />
-                    <MultiSelect label="PI COD" options={filterOptions.pi_cod_values} selected={fPiCod} onChange={setFPiCod} />
-                    <MultiSelect label="PI NOME" options={filterOptions.pi_nome_values} selected={fPiNome} onChange={setFPiNome} />
-                    <MultiSelect label="ND CÓDIGO" options={filterOptions.nd_codigo_values} selected={fNdCodigo} onChange={setFNdCodigo} />
-                    <MultiSelect label="ND NOME" options={filterOptions.nd_nome_values} selected={fNdNome} onChange={setFNdNome} />
+                    <MultiSelect label="PI NOME – CÓDIGO" options={filterOptions.pi_filter_values} selected={fPi} onChange={setFPi} />
+                    <MultiSelect label="ND NOME – CÓDIGO" options={filterOptions.nd_filter_values} selected={fNd} onChange={setFNd} />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                     <DateInput label="INÍCIO (DE)" value={dInicDe} onChange={setDInicDe} />
@@ -2028,7 +2110,16 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
             <CollapsibleSection title="ESTATÍSTICAS" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
             <div className="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e QTD por Gestor</h3>
+                    <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+                        <h3 className="text-xs font-black text-slate-800 uppercase">Valor Empenhado e QTD por Gestor</h3>
+                        <select value={gestorChartSort} onChange={(e) => setGestorChartSort(e.target.value)} className="text-[9px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
+                            <option value="qtd_tit">QTD Titular</option>
+                            <option value="qtd_sub">QTD Substituto</option>
+                            <option value="emp_tit">Emp Titular</option>
+                            <option value="emp_sub">Emp Substituto</option>
+                            <option value="nome_asc">A-Z</option>
+                        </select>
+                    </div>
                     <ChartComponent id="gGestor" type="bar" data={{
                         labels: gestorDataProcessed.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
@@ -2040,7 +2131,16 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                     }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 20, scaleID: 'x1' }, datalabels: { display: true }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-xs font-black text-slate-800 mb-4 uppercase">Valor Empenhado e QTD por Fiscal</h3>
+                    <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+                        <h3 className="text-xs font-black text-slate-800 uppercase">Valor Empenhado e QTD por Fiscal</h3>
+                        <select value={fiscalChartSort} onChange={(e) => setFiscalChartSort(e.target.value)} className="text-[9px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
+                            <option value="qtd_tit">QTD Titular</option>
+                            <option value="qtd_sub">QTD Substituto</option>
+                            <option value="emp_tit">Emp Titular</option>
+                            <option value="emp_sub">Emp Substituto</option>
+                            <option value="nome_asc">A-Z</option>
+                        </select>
+                    </div>
                     <ChartComponent id="gFiscal" type="bar" data={{
                         labels: fiscalDataProcessed.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
@@ -2105,6 +2205,9 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 <option value="ano">VER POR ANO</option>
                                 <option value="modalidade">VER POR MODALIDADE</option>
                                 <option value="sec_log">VER POR SEC LOG</option>
+                                <option value="ao_codigo">VER POR AO CÓDIGO</option>
+                                <option value="nd_codigo">VER POR ND CÓDIGO</option>
+                                <option value="pi_codigo">VER POR PI CÓDIGO</option>
                             </select>
                         </div>
                     </div>
@@ -2112,14 +2215,15 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                         <ChartComponent id="gTop20" type="bar" data={{
                             labels: top20DataProcessed.map(d => formatLabelMultiLine(top20ViewMode === 'fornecedor' ? d.label.replace(/^[\d\.\-\/]+\s*-\s*/, '') : d.label)),
                             datasets: [
+                                { label: 'QTD Contratos', data: top20DataProcessed.map(d => d.count), backgroundColor: '#8b5cf6', borderColor: '#8b5cf6', yAxisID: 'y1', type: 'line', borderWidth: 2, pointRadius: 4, order: 1, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', rotation: -90, align: 'bottom', anchor: 'start', font: { size: 9, weight: 'bold' } } },
                                 { label: 'Empenhado', data: top20DataProcessed.map(d => d.total), backgroundColor: '#3b82f6', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                                { label: 'Recebido', data: top20DataProcessed.map(d => d.recebido), backgroundColor: '#06b6d4', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
                                 { label: 'Liquidado', data: top20DataProcessed.map(d => d.liquidado), backgroundColor: '#f59e0b', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
                                 { label: 'Pago', data: top20DataProcessed.map(d => d.pago), backgroundColor: '#10b981', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
-                                { label: 'A Liquidar', data: top20DataProcessed.map(d => Math.max(0, d.total - d.liquidado - d.cancelado - d.bloqueado)), backgroundColor: '#cbd5e1', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
                                 { label: 'Bloqueado', data: top20DataProcessed.map(d => d.bloqueado), backgroundColor: '#f97316', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
                                 { label: 'Cancelado', data: top20DataProcessed.map(d => d.cancelado), backgroundColor: '#ef4444', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
-                                { label: 'A Pagar', data: top20DataProcessed.map(d => Math.max(0, d.total - d.pago - d.cancelado - d.bloqueado)), backgroundColor: '#94a3b8', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
-                                ...(top20ViewMode === 'fornecedor' || top20ViewMode === 'contrato' ? [{ label: 'QTD Contratos', data: top20DataProcessed.map(d => d.count), backgroundColor: '#8b5cf6', borderColor: '#8b5cf6', yAxisID: 'y1', type: 'line', borderWidth: 2, pointRadius: 4, order: 1, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', rotation: -90, align: 'bottom', anchor: 'start', font: { size: 9, weight: 'bold' } } }] : [{ label: 'QTD Contratos', data: top20DataProcessed.map(d => d.count), backgroundColor: '#8b5cf6', borderColor: '#8b5cf6', yAxisID: 'y1', type: 'line', borderWidth: 2, pointRadius: 4, order: 1, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', rotation: -90, align: 'bottom', anchor: 'start', font: { size: 9, weight: 'bold' } } }])
+                                { label: 'A Liquidar', data: top20DataProcessed.map(d => Math.max(0, d.a_liquidar)), backgroundColor: '#cbd5e1', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
+                                { label: 'A Pagar', data: top20DataProcessed.map(d => Math.max(0, d.a_pagar)), backgroundColor: '#94a3b8', yAxisID: 'y', borderRadius: 4, order: 2, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', rotation: -90, align: 'start', anchor: 'end', font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } }
                             ]
                         }} options={{ 
                             indexAxis: 'x', responsive: true, maintainAspectRatio: false, 
@@ -2147,7 +2251,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                     }
                                 },
                                 datalabels: { display: false },
-                                legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 } } }
+                                legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 }, sort: (a, b) => ['QTD Contratos', 'Empenhado', 'Recebido', 'Liquidado', 'Pago', 'Bloqueado', 'Cancelado', 'A Liquidar', 'A Pagar'].indexOf(a.text) - ['QTD Contratos', 'Empenhado', 'Recebido', 'Liquidado', 'Pago', 'Bloqueado', 'Cancelado', 'A Liquidar', 'A Pagar'].indexOf(b.text) } }
                             },
                             scales: { 
                                 x: { ticks: { maxRotation: 90, minRotation: 45, font: { size: 9, weight: 'bold' }, autoSkip: false } }, 
@@ -2174,6 +2278,9 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 <option value="ano">VER POR ANO</option>
                                 <option value="modalidade">VER POR MODALIDADE</option>
                                 <option value="sec_log">VER POR SEC LOG</option>
+                                <option value="ao_codigo">VER POR AO CÓDIGO</option>
+                                <option value="nd_codigo">VER POR ND CÓDIGO</option>
+                                <option value="pi_codigo">VER POR PI CÓDIGO</option>
                             </select>
                         </div>
                     </div>
@@ -2181,20 +2288,14 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                         <ChartComponent id="gTop20100" type="bar" data={{
                             labels: top20100DataProcessed.map(d => formatLabelMultiLine(top20100ViewMode === 'fornecedor' ? d.label.replace(/^[\d\.\-\/]+\s*-\s*/, '') : d.label)),
                             datasets: [
+                                { label: 'QTD Contratos', data: top20100DataProcessed.map(d => d.count), backgroundColor: '#8b5cf6', borderColor: '#8b5cf6', type: 'line', borderWidth: 2, pointRadius: 4, xAxisID: 'x', yAxisID: 'y1', order: 1, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', rotation: -90, align: 'bottom', anchor: 'start', font: { size: 9, weight: 'bold' } } },
+                                { label: 'Empenhado (100 %)', data: top20100DataProcessed.map(d => 100), backgroundColor: 'transparent', borderColor: '#3b82f6', borderWidth: 2, xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '2', order: 3, datalabels: { display: false } },
+                                { label: 'Recebido %', data: top20100DataProcessed.map(d => d.p_recebido * 100), backgroundColor: 'transparent', borderColor: '#06b6d4', borderWidth: { top: 4, right: 0, bottom: 0, left: 0 }, xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '3', order: 2, datalabels: { display: false } },
                                 // Fundo / Stack de Componentes da Despesa (Somam 100% do Empenho) - Agrupados juntos e com Z-index mais baixo
                                 { label: 'Liquidado %', data: top20100DataProcessed.map(d => d.total ? (d.liquidado / d.total) * 100 : 0), backgroundColor: '#f59e0b', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } },
-                                { label: 'A Liquidar %', data: top20100DataProcessed.map(d => d.total ? Math.max(0, ((d.total - d.liquidado - d.bloqueado - d.cancelado) / d.total) * 100) : 0), backgroundColor: '#cbd5e1', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#1e293b', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } },
+                                { label: 'A Liquidar %', data: top20100DataProcessed.map(d => d.p_a_liquidar * 100), backgroundColor: '#cbd5e1', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#1e293b', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } },
                                 { label: 'Bloqueado %', data: top20100DataProcessed.map(d => d.total ? (d.bloqueado / d.total) * 100 : 0), backgroundColor: '#f97316', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } },
-                                { label: 'Cancelado %', data: top20100DataProcessed.map(d => d.total ? (d.cancelado / d.total) * 100 : 0), backgroundColor: '#ef4444', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } },
-                                
-                                // Empenhado Base (Borda Azul sobrepondo Tudo)
-                                { label: 'Empenhado (100%)', data: top20100DataProcessed.map(d => 100), backgroundColor: 'transparent', borderColor: '#3b82f6', borderWidth: 2, xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '2', order: 3, datalabels: { display: false } },
-                                
-                                // Pago Acumulado (Linha Superior Verde sobrepondo Tudo)
-                                { label: 'Pago %', data: top20100DataProcessed.map(d => d.total ? (d.pago / d.total) * 100 : 0), backgroundColor: 'transparent', borderColor: '#10b981', borderWidth: { top: 4, right: 0, bottom: 0, left: 0 }, xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '3', order: 2, datalabels: { display: false } },
-                                
-                                // Linha de Quantidade Contratos (Sempre no Topo Z-Index)
-                                { label: 'QTD Contratos', data: top20100DataProcessed.map(d => d.count), backgroundColor: '#8b5cf6', borderColor: '#8b5cf6', type: 'line', borderWidth: 2, pointRadius: 4, xAxisID: 'x', yAxisID: 'y1', order: 1, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', rotation: -90, align: 'bottom', anchor: 'start', font: { size: 9, weight: 'bold' } } }
+                                { label: 'Cancelado %', data: top20100DataProcessed.map(d => d.total ? (d.cancelado / d.total) * 100 : 0), backgroundColor: '#ef4444', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } }
                             ]
                         }} options={{ 
                             indexAxis: 'x', responsive: true, maintainAspectRatio: false, 
@@ -2221,24 +2322,25 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                             const d = top20100DataProcessed[idx];
                                             let absVal = 0;
                                             
-                                            if (label.includes('Liquidado')) absVal = d.liquidado;
-                                            else if (label.includes('A Liquidar')) absVal = Math.max(0, d.total - d.liquidado - d.bloqueado - d.cancelado);
+                                            if (label.includes('Recebido')) absVal = d.recebido;
+                                            else if (label.includes('Liquidado')) absVal = d.liquidado;
+                                            else if (label.includes('A Liquidar')) absVal = Math.max(0, d.a_liquidar);
                                             else if (label.includes('Bloqueado')) absVal = d.bloqueado;
                                             else if (label.includes('Cancelado')) absVal = d.cancelado;
                                             else if (label.includes('Empenhado')) absVal = d.total;
-                                            else if (label.includes('Pago')) absVal = d.pago;
                                             
-                                            return `${label.replace(' %', '').replace(' (100%)', '')}: ${percentStr} (${formatBRL(absVal)})`;
+                                            const cleanLabel = label === 'Empenhado (100 %)' ? 'Empenhado' : label.replace(/ %$/, '');
+                                            return `${cleanLabel}: ${percentStr} (${formatBRL(absVal)})`;
                                         }
                                     }
                                 }, 
                                 datalabels: { display: true },
-                                legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 } } }
+                                legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 }, sort: (a, b) => ['QTD Contratos', 'Empenhado (100 %)', 'Recebido %', 'Liquidado %', 'A Liquidar %', 'Bloqueado %', 'Cancelado %'].indexOf(a.text) - ['QTD Contratos', 'Empenhado (100 %)', 'Recebido %', 'Liquidado %', 'A Liquidar %', 'Bloqueado %', 'Cancelado %'].indexOf(b.text) } }
                             },
                             scales: { 
                                 x: { stacked: true, ticks: { maxRotation: 90, minRotation: 45, font: { size: 9, weight: 'bold' }, autoSkip: false } }, 
                                 y: { stacked: true, position: 'left', min: 0, max: 105, ticks: { callback: v => v + '%' }, title: { display: true, text: 'Percentual (%)', font: { size: 8 } } }, 
-                                y1: { display: top20100ViewMode === 'fornecedor', position: 'right', grid: { display: false }, title: { display: true, text: 'Quantidade', font: { size: 8 } }, grace: '10%', beginAtZero: true } 
+                                y1: { display: true, position: 'right', grid: { display: false }, title: { display: true, text: 'Quantidade', font: { size: 8 } }, grace: '10%', beginAtZero: true }
                             } 
                         }} />
                     </div>
@@ -2371,7 +2473,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                         }} options={{
                             responsive: true, maintainAspectRatio: false,
                             plugins: { 
-                                tooltip: getBubbleTooltip(scatterXAxis === 'p_executado' ? '% Executado' : scatterXAxis === 'p_liquidado' ? '% Liquidado' : '% Pago'), 
+                                tooltip: getBubbleTooltip(),
                                 datalabels: { display: false }, 
                                 legend: { display: false },
                                 scatterQuadrantPlugin: { display: true }
@@ -2386,6 +2488,10 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                             if (value >= 0 && value <= 100) return value + '%';
                                             return null;
                                         }
+                                    },
+                                    grid: {
+                                        color: context => [0, 100].includes(Number(context.tick.value)) ? '#f97316' : 'rgba(203, 213, 225, 0.55)',
+                                        lineWidth: context => [0, 100].includes(Number(context.tick.value)) ? 2 : 1
                                     }
                                 },
                                 y: { 
@@ -2397,6 +2503,10 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                             if (value >= 0 && value <= 100) return value + '%';
                                             return null;
                                         }
+                                    },
+                                    grid: {
+                                        color: context => [0, 100].includes(Number(context.tick.value)) ? '#f97316' : 'rgba(203, 213, 225, 0.55)',
+                                        lineWidth: context => [0, 100].includes(Number(context.tick.value)) ? 2 : 1
                                     }
                                 }
                             }
@@ -2459,6 +2569,9 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 {masterVisibleCols.fornecedor && <TextHeader widthClass="master-text-col w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />}
                                 {masterVisibleCols.objeto && <TextHeader widthClass="master-text-col w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />}
                                 {masterVisibleCols.gestorFiscal && <TextHeader widthClass="master-text-col w-[7%]" label="Gestores/Fiscais" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />}
+                                {masterVisibleCols.ao && <TextHeader widthClass="master-text-col" label="AO" field="ao_codigos" current={sortConfig} onSort={handleSort} />}
+                                {masterVisibleCols.po && <TextHeader widthClass="master-text-col" label="PO" field="po_codigos" current={sortConfig} onSort={handleSort} />}
+                                {masterVisibleCols.nd && <TextHeader widthClass="master-text-col" label="ND" field="nd_codigos" current={sortConfig} onSort={handleSort} />}
                                 {masterVisibleCols.dataInic && <DateFilterHeader widthClass="w-[5%]" label="Início" field="data_inic" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />}
                                 {masterVisibleCols.dataFim && <DateFilterHeader widthClass="w-[5%]" label="Fim" field="data_fim" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />}
                                 {masterVisibleCols.percTempo && <NumericHeader widthClass="w-[6%]" label="% Tempo" field="perc_tempo" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
@@ -2502,7 +2615,13 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                         </div>
                                     </td>}
                                     {masterVisibleCols.secLog && <td className="master-text-col p-3 text-slate-600 font-black break-words">{row.sec_log}</td>}
-                                    {masterVisibleCols.fornecedor && <td className="master-text-col p-3 text-slate-600 font-bold break-words">{row.fornecedor}</td>}
+                                    {masterVisibleCols.fornecedor && <td className="master-text-col p-3 text-slate-600 font-bold break-words">
+                                        {getFornecedorCnpj(row.fornecedor) ? (
+                                            <a href={`https://portaldatransparencia.gov.br/pessoa-juridica/${getFornecedorCnpj(row.fornecedor)}`} target="_blank" rel="noopener noreferrer" className="text-blue-700 hover:text-blue-900 hover:underline" title="Abrir fornecedor no Portal da Transparência">
+                                                {row.fornecedor}
+                                            </a>
+                                        ) : row.fornecedor}
+                                    </td>}
                                     {masterVisibleCols.objeto && <td className="master-text-col p-3 text-slate-500 break-words">{row.objeto}</td>}
                                     {masterVisibleCols.gestorFiscal && <td className="master-text-col p-3 break-words">
                                         <div className="font-bold text-slate-700" title="Gestor Titular">GT: {row.gestor}</div>
@@ -2510,6 +2629,9 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                         <div className="font-bold text-slate-700 mt-1" title="Fiscal Titular">FT: {row.fiscal}</div>
                                         {row.fiscal_sub !== 'N/I' && <div className="text-[9px] text-slate-500" title="Fiscal Substituto">FS: {row.fiscal_sub}</div>}
                                     </td>}
+                                    {masterVisibleCols.ao && <td className="master-text-col p-3 text-slate-600 font-bold" title={(row.ao_filter_values || []).join('\n')}>{row.ao_codigos}</td>}
+                                    {masterVisibleCols.po && <td className="master-text-col p-3 text-slate-600 font-bold" title={(row.po_filter_values || []).join('\n')}>{row.po_codigos}</td>}
+                                    {masterVisibleCols.nd && <td className="master-text-col p-3 text-slate-600 font-bold" title={(row.nd_filter_values || []).join('\n')}>{row.nd_codigos}</td>}
                                     {masterVisibleCols.dataInic && <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_inic || "-"}</td>}
                                     {masterVisibleCols.dataFim && <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_fim || "-"}</td>}
                                     {masterVisibleCols.percTempo && <td className="p-3 align-middle">{row.perc_tempo !== null ? (<div className="flex items-center gap-1"><div className="w-full bg-slate-200 rounded-full h-1.5 flex-1 overflow-hidden"><div className={`h-1.5 rounded-full ${row.perc_tempo >= 1 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(Math.max(row.perc_tempo * 100, 0), 100)}%` }}></div></div><span className="text-[8px] font-bold text-slate-600 min-w-[30px] text-right">{formatPercentBR(row.perc_tempo)}</span></div>) : "-"}</td>}

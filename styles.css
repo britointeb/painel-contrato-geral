@@ -15,6 +15,14 @@ body { font-family: 'Outfit', sans-serif; }
     padding-right: 0.55rem;
     font-variant-numeric: tabular-nums;
 }
+.finance-detail-table .master-text-col {
+    width: auto;
+    min-width: 9ch;
+    max-width: 30ch;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
 ::-webkit-scrollbar { height: 8px; width: 8px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
