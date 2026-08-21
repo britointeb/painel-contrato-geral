@@ -199,7 +199,7 @@ const normalizeStr = (str) => {
     return str.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9%]/g, '');
 };
 
-// Implantação correspondente ao Code.gs V19 (2026-08-08-orcamentario-por-documento-ccor).
+// Implantação correspondente ao Code.gs V20 (2026-08-08-orcamentario-por-documento-ccor).
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwDf4gT-FPusNrbuXS0t-dE-LCLmqXmMVG7QX34GuQUHWc3EwjEargr1Mdi4DeXwpxf/exec";
 const DASH_CACHE_KEY = 'dashData_PainelGeral_api_v19_recebido_contabil_v3';
 
@@ -1998,7 +1998,7 @@ function Dashboard() {
                     <h1 className="text-3xl font-black uppercase tracking-tighter text-slate-800">PAINEL GERAL DE CONTRATOS</h1>
                     <p className={`text-[11px] font-bold mt-1 ${status.includes("Erro") || status.includes("falhou") || status.includes("Falha") ? "text-red-600" : "text-emerald-600"}`}>● {status}</p>
                     <p className="text-[11px] italic text-blue-600 mt-0.5">Produzido por Cel Brito.</p>
-                    <p className="text-[10px] font-black text-slate-500 mt-0.5 uppercase tracking-widest">Versão V19</p>
+                    <p className="text-[10px] font-black text-slate-500 mt-0.5 uppercase tracking-widest">Versão V20</p>
                 </div>
                 <div className="flex flex-nowrap gap-3 items-center bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm overflow-x-auto max-w-full">
                     <span className="text-[11px] font-black text-slate-400 uppercase tracking-tight whitespace-nowrap">CARGA MANUAL:</span>
