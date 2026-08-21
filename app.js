@@ -199,10 +199,10 @@ const normalizeStr = (str) => {
     return str.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9%]/g, '');
 };
 
-// Implantação V21, compatível com o Code.gs orçamentário por documento CCor.
+// Implantação V22, compatível com o Code.gs orçamentário por documento CCor.
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwDf4gT-FPusNrbuXS0t-dE-LCLmqXmMVG7QX34GuQUHWc3EwjEargr1Mdi4DeXwpxf/exec";
-const DASH_CACHE_KEY = 'dashData_PainelGeral_api_v21_orc_detail_v5';
-const DASH_VERSION = 'V21';
+const DASH_CACHE_KEY = 'dashData_PainelGeral_api_v22_orc_detail_v6';
+const DASH_VERSION = 'V22';
 
 const AUTH_STORAGE_KEYS = [
     'token_PainelGeral',
@@ -344,42 +344,69 @@ const formatLabelMultiLine = (text, maxLength = 18) => {
     return lines;
 };
 
+const getExportMetadata = () => {
+    const metadataElement = document.querySelector('[data-access-metadata]');
+    const accessLocation = metadataElement?.dataset.accessLocation || 'LOCALIZAÇÃO INDISPONÍVEL';
+    const now = new Date();
+    const datePart = new Intl.DateTimeFormat('pt-BR', {
+        day: '2-digit', month: 'long', year: 'numeric'
+    }).format(now);
+    const timePart = new Intl.DateTimeFormat('pt-BR', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).format(now);
+    return [
+        `${accessLocation} – ${datePart}; ${timePart}`,
+        `Versão ${DASH_VERSION}`,
+        'Produzido por Cel Brito'
+    ];
+};
+
+const sanitizeFilename = (value) => String(value || 'exportacao')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .substring(0, 90) || 'exportacao';
+
+const formatExportCell = (row, column) => {
+    let value = column.format ? column.format(row) : row[column.key];
+    if (value === null || value === undefined || value === '') return '-';
+    if (column.isPercent) return formatPercentBR(value);
+    if (column.isCurrency) return formatBRL(value);
+    return value;
+};
+
 const exportTable = {
     toExcel: (data, filename, columns) => {
         if (!window.XLSX) { alert("Biblioteca Excel não encontrada."); return; }
-        const wsData = data.map(row => {
-            let obj = {};
-            columns.forEach(c => {
-                let val = row[c.key];
-                if (val === null || val === undefined) val = "-";
-                else if (c.isPercent) val = formatPercentBR(val);
-                else if (c.isCurrency) val = formatBRL(val);
-                obj[c.header] = val;
-            });
-            return obj;
-        });
-        const ws = XLSX.utils.json_to_sheet(wsData);
+        const metadata = getExportMetadata();
+        const rows = [
+            columns.map(column => column.header),
+            ...data.map(row => columns.map(column => formatExportCell(row, column))),
+            [],
+            ...metadata.map(line => [line])
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!cols'] = columns.map(column => ({ wch: Math.min(32, Math.max(10, column.header.length + 2)) }));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Dados");
-        XLSX.writeFile(wb, `${filename}.xlsx`);
+        XLSX.writeFile(wb, `${sanitizeFilename(filename)}.xlsx`);
     },
     toCSV: (data, filename, columns) => {
         let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
         csvContent += columns.map(c => c.header).join(";") + "\n";
         data.forEach(row => {
             let r = columns.map(c => {
-                let val = row[c.key];
-                if (val === null || val === undefined) val = "-";
-                else if (c.isPercent) val = formatPercentBR(val);
-                else if (typeof val === 'number') return val.toString().replace('.', ',');
-                return `"${(val || '').toString().replace(/"/g, '""')}"`;
+                const val = formatExportCell(row, c);
+                if (typeof val === 'number') return val.toString().replace('.', ',');
+                return `"${String(val).replace(/"/g, '""')}"`;
             });
             csvContent += r.join(";") + "\n";
         });
+        csvContent += "\n" + getExportMetadata().map(line => `"${line.replace(/"/g, '""')}"`).join("\n");
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `${filename}.csv`);
+        link.setAttribute("download", `${sanitizeFilename(filename)}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -388,25 +415,64 @@ const exportTable = {
         if (!window.jspdf || !window.jspdf.jsPDF) { alert("Biblioteca PDF não encontrada."); return; }
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('l', 'pt', 'a4');
+        const metadata = getExportMetadata();
         doc.setFontSize(14);
         doc.text(title, 40, 30);
         const tableHead = [columns.map(c => c.header)];
-        const tableBody = data.map(row => {
-            return columns.map(c => {
-                let val = row[c.key];
-                if (val === null || val === undefined) return "-";
-                if (c.isCurrency) return formatBRL(val);
-                if (c.isPercent) return formatPercentBR(val);
-                return val.toString();
-            });
-        });
+        const tableBody = data.map(row => columns.map(c => String(formatExportCell(row, c))));
         doc.autoTable({
             head: tableHead, body: tableBody, startY: 40,
             styles: { fontSize: 5, cellPadding: 2, overflow: 'linebreak' },
             headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255] },
-            margin: { top: 20, left: 10, right: 10 }
+            margin: { top: 20, left: 10, right: 10, bottom: 54 },
+            didDrawPage: () => {
+                const pageHeight = doc.internal.pageSize.getHeight();
+                doc.setDrawColor(203, 213, 225);
+                doc.line(24, pageHeight - 44, doc.internal.pageSize.getWidth() - 24, pageHeight - 44);
+                doc.setTextColor(71, 85, 105);
+                doc.setFontSize(7);
+                metadata.forEach((line, index) => {
+                    doc.setFont(undefined, index === 2 ? 'italic' : 'normal');
+                    doc.text(line, 28, pageHeight - 31 + (index * 10));
+                });
+            }
         });
-        doc.save(`${filename}.pdf`);
+        doc.save(`${sanitizeFilename(filename)}.pdf`);
+    },
+    toPNG: (canvas, filename, title) => {
+        if (!canvas) { alert('Gráfico não encontrado para exportação.'); return; }
+        const scale = Math.max(1, canvas.width / Math.max(canvas.clientWidth || canvas.width, 1));
+        const padding = Math.round(24 * scale);
+        const headerHeight = Math.round(54 * scale);
+        const footerHeight = Math.round(82 * scale);
+        const output = document.createElement('canvas');
+        output.width = canvas.width + (padding * 2);
+        output.height = canvas.height + headerHeight + footerHeight;
+        const context = output.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, output.width, output.height);
+        context.fillStyle = '#1e293b';
+        context.font = `800 ${Math.round(14 * scale)}px Outfit, Arial, sans-serif`;
+        context.fillText(String(title || 'Gráfico').toUpperCase(), padding, Math.round(32 * scale));
+        context.drawImage(canvas, padding, headerHeight);
+        const footerTop = headerHeight + canvas.height + Math.round(12 * scale);
+        context.strokeStyle = '#cbd5e1';
+        context.lineWidth = Math.max(1, scale);
+        context.beginPath();
+        context.moveTo(padding, footerTop);
+        context.lineTo(output.width - padding, footerTop);
+        context.stroke();
+        getExportMetadata().forEach((line, index) => {
+            context.fillStyle = '#475569';
+            context.font = `${index === 2 ? 'italic ' : ''}700 ${Math.round(10 * scale)}px Outfit, Arial, sans-serif`;
+            context.fillText(line, padding, footerTop + Math.round((19 + (index * 17)) * scale));
+        });
+        const link = document.createElement('a');
+        link.download = `${sanitizeFilename(filename)}.png`;
+        link.href = output.toDataURL('image/png');
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 };
 
@@ -529,12 +595,30 @@ const getBubbleTooltip = () => ({
 
 const startResize = (e) => {
     const th = e.target.closest('th');
+    const table = th?.closest('table');
+    if (!th || !table) return;
     const startX = e.pageX;
     const startWidth = th.getBoundingClientRect().width;
-    const onMouseMove = (moveEvent) => { th.style.width = `${Math.max(40, startWidth + moveEvent.pageX - startX)}px`; };
+    const columnIndex = th.cellIndex;
+    const columnCells = Array.from(table.querySelectorAll('thead tr, tbody tr, tfoot tr'))
+        .map(row => Array.from(row.cells).find(cell => cell.cellIndex === columnIndex && cell.colSpan === 1))
+        .filter(Boolean);
+    th.dataset.userSized = 'true';
+    document.body.style.userSelect = 'none';
+    const onMouseMove = (moveEvent) => {
+        const width = Math.max(40, startWidth + moveEvent.pageX - startX);
+        columnCells.forEach(cell => {
+            cell.style.width = `${width}px`;
+            cell.style.minWidth = '40px';
+            cell.style.maxWidth = `${width}px`;
+            cell.style.whiteSpace = 'normal';
+            cell.style.overflowWrap = 'anywhere';
+        });
+    };
     const onMouseUp = () => {
         document.removeEventListener('mousemove', onMouseMove);
         document.removeEventListener('mouseup', onMouseUp);
+        document.body.style.userSelect = '';
     };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
@@ -566,7 +650,7 @@ function AutoFitText({ text, className }) {
     );
 }
 
-const ChartComponent = ({ type, data, options, id }) => {
+const ChartComponent = ({ type, data, options, id, exportTitle }) => {
     const canvasRef = useRef(null);
     const chartInstance = useRef(null);
     useEffect(() => {
@@ -576,18 +660,87 @@ const ChartComponent = ({ type, data, options, id }) => {
         chartInstance.current = new Chart(ctx, { type, data, options });
         return () => { if (chartInstance.current) chartInstance.current.destroy(); };
     }, [data, options, type]);
-    return <canvas ref={canvasRef}></canvas>;
+    const handlePngExport = () => {
+        const canvas = canvasRef.current;
+        const nearbyTitle = canvas?.closest('.bg-white')?.querySelector('h3')?.textContent?.trim();
+        const title = exportTitle || nearbyTitle || id || 'Gráfico';
+        exportTable.toPNG(canvas, title, title);
+    };
+    const getChartTableExport = () => {
+        const datasets = data?.datasets || [];
+        const firstRaw = datasets[0]?.data?.[0];
+        if (firstRaw && typeof firstRaw === 'object' && !Array.isArray(firstRaw)) {
+            const rows = datasets.flatMap(dataset => (dataset.data || []).map(point => ({
+                contrato: point.contrato || '-', situacao: point.situacao || '-', fornecedor: point.fornecedor || '-',
+                empenhado: point.v_empenhado || 0, recebido: point.v_recebido || 0,
+                liquidado: point.v_liquidado || 0, pago: point.v_pago || 0,
+                eixo_x: point.x ?? 0, eixo_y: point.y ?? 0
+            })));
+            return {
+                rows,
+                columns: [
+                    { header: 'CONTRATO', key: 'contrato' }, { header: 'SITUAÇÃO', key: 'situacao' }, { header: 'FORNECEDOR', key: 'fornecedor' },
+                    { header: 'EMPENHADO', key: 'empenhado', isCurrency: true }, { header: 'RECEBIDO', key: 'recebido', isCurrency: true },
+                    { header: 'LIQUIDADO', key: 'liquidado', isCurrency: true }, { header: 'PAGO', key: 'pago', isCurrency: true },
+                    { header: 'EIXO X (%)', key: 'eixo_x', format: row => `${Number(row.eixo_x || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%` },
+                    { header: 'EIXO Y (%)', key: 'eixo_y', format: row => `${Number(row.eixo_y || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%` }
+                ]
+            };
+        }
+        const rows = (data?.labels || []).map((label, index) => {
+            const row = { subject: Array.isArray(label) ? label.join(' ') : label };
+            datasets.forEach((dataset, datasetIndex) => { row[`dataset_${datasetIndex}`] = dataset.data?.[index] ?? 0; });
+            return row;
+        });
+        const columns = [{ header: 'ASSUNTO', key: 'subject' }, ...datasets.map((dataset, datasetIndex) => {
+            const label = dataset.label || `SÉRIE ${datasetIndex + 1}`;
+            const isPercent = label.includes('%');
+            const isCurrency = !isPercent && !/QTD|QUANT|CONTRATOS|INICIADOS|ENCERRADOS|DURANTE/i.test(label)
+                && /EMPENH|RECEB|LIQUID|PAGO|BLOQ|CANCEL|A LIQUIDAR|A PAGAR|VALOR|GLOBAL|EXECUTADO/i.test(label);
+            return {
+                header: label.toUpperCase(),
+                key: `dataset_${datasetIndex}`,
+                isCurrency,
+                format: isPercent ? row => {
+                    const value = Number(row[`dataset_${datasetIndex}`] || 0);
+                    return Math.abs(value) > 1 ? `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%` : formatPercentBR(value);
+                } : undefined
+            };
+        })];
+        return { rows, columns };
+    };
+    const handleChartTableExport = (format) => {
+        const canvas = canvasRef.current;
+        const nearbyTitle = canvas?.closest('.bg-white')?.querySelector('h3')?.textContent?.trim();
+        const title = exportTitle || nearbyTitle || id || 'Gráfico';
+        const { rows, columns } = getChartTableExport();
+        if (format === 'excel') exportTable.toExcel(rows, title, columns);
+        else if (format === 'csv') exportTable.toCSV(rows, title, columns);
+        else exportTable.toPDF(rows, title, columns, title);
+    };
+    return (
+        <div className="chart-export-host relative w-full h-full">
+            <div className="chart-export-actions absolute right-1 top-1 z-20 flex gap-1" aria-label="Exportar gráfico e dados">
+                <button type="button" onClick={handlePngExport} className="rounded bg-slate-800/90 px-2 py-1 text-[8px] font-black text-white shadow hover:bg-slate-700" title="Exportar a visualização atual em PNG">PNG</button>
+                <button type="button" onClick={() => handleChartTableExport('excel')} className="rounded bg-green-600/90 px-2 py-1 text-[8px] font-black text-white shadow hover:bg-green-500" title="Exportar dados para Excel">EXCEL</button>
+                <button type="button" onClick={() => handleChartTableExport('csv')} className="rounded bg-blue-600/90 px-2 py-1 text-[8px] font-black text-white shadow hover:bg-blue-500" title="Exportar dados para CSV">CSV</button>
+                <button type="button" onClick={() => handleChartTableExport('pdf')} className="rounded bg-red-600/90 px-2 py-1 text-[8px] font-black text-white shadow hover:bg-red-500" title="Exportar dados para PDF">PDF</button>
+            </div>
+            <canvas id={id} ref={canvasRef}></canvas>
+        </div>
+    );
 };
 
 // Componente: alterna entre Pizza, Barras e Tabela com seletor financeiro.
-function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
+function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor, subjectLabel: subjectLabelProp }) {
     const [viewMode, setViewMode] = useState('pie');
     const [finMetric, setFinMetric] = useState('total');
+    const [tableSort, setTableSort] = useState({ field: 'value', direction: 'desc' });
 
     const activeMetric = isFinancial ? finMetric : 'count';
 
-    const cleanData = useMemo(() => {
-        let processed = [...data];
+    const sortedData = useMemo(() => {
+        let processed = data.map(item => ({ ...item, fullLabel: item.fullLabel || item.label }));
         if (isFornecedor) {
             processed = processed.map(d => ({
                 ...d,
@@ -596,12 +749,14 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
         }
         
         // Sorting by chosen dynamic metric
-        processed.sort((a, b) => b[activeMetric] - a[activeMetric]);
+        processed.sort((a, b) => (b[activeMetric] || 0) - (a[activeMetric] || 0) || String(a.label).localeCompare(String(b.label), 'pt-BR'));
+        return processed;
+    }, [data, isFornecedor, activeMetric]);
 
-        // Re-group into "OUTROS" dynamic slice
-        if (processed.length > 10) {
-            const top9 = processed.slice(0, 9);
-            const others = processed.slice(9).reduce((acc, curr) => {
+    const chartData = useMemo(() => {
+        if (sortedData.length <= 10) return sortedData;
+        const top9 = sortedData.slice(0, 9);
+        const others = sortedData.slice(9).reduce((acc, curr) => {
                 acc.count += curr.count || 0;
                 acc.total += curr.total || 0;
                 acc.recebido += curr.recebido || 0;
@@ -614,15 +769,15 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
                 acc.cancelado += curr.cancelado || 0;
                 acc.executado += curr.executado || 0;
                 return acc;
-            }, { label: "OUTROS", count: 0, total: 0, recebido: 0, a_receber: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0 });
-            processed = [...top9, others];
-        }
-        return processed;
-    }, [data, isFornecedor, activeMetric]);
+            }, { label: "OUTROS", fullLabel: "OUTROS", count: 0, total: 0, recebido: 0, a_receber: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0 });
+        return [...top9, others];
+    }, [sortedData]);
 
-    const chartLabels = cleanData.map(d => formatLabelMultiLine(d.label, 15));
-    const displayedValues = cleanData.map(d => d[activeMetric] || 0);
+    const chartLabels = chartData.map(d => formatLabelMultiLine(d.label, 15));
+    const displayedValues = sortedData.map(d => d[activeMetric] || 0);
     const displayedTotal = displayedValues.reduce((sum, value) => sum + value, 0);
+    const totalCount = sortedData.reduce((sum, item) => sum + (item.count || 0), 0);
+    const totalValue = sortedData.reduce((sum, item) => sum + (isFinancial ? item[activeMetric] || 0 : item.total || 0), 0);
     
     const metricNames = {
         'total': 'Empenhado', 'recebido': 'Recebido', 'a_receber': 'A Receber',
@@ -633,13 +788,52 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
     };
     const currentMetricName = metricNames[activeMetric];
     const displayTitle = isFinancial ? title.replace(/Empenhado/i, currentMetricName) : title;
+    const subjectToken = title.match(/\(([^)]+)\)/)?.[1]?.trim().toUpperCase() || 'ASSUNTO';
+    const subjectNames = {
+        'MOD': 'MODALIDADE', 'SEC': 'SEC LOG', 'NR COMPRA': 'COMPRA',
+        'FORNECEDOR': 'FORNECEDOR', 'ANO VIG INI': 'ANO VIG INI',
+        'SITUAÇÃO': 'SITUAÇÃO', 'AO CÓDIGO': 'AO CÓDIGO', 'PO CÓDIGO': 'PO CÓDIGO', 'ND CÓDIGO': 'ND CÓDIGO'
+    };
+    const subjectLabel = subjectLabelProp || subjectNames[subjectToken] || subjectToken;
+
+    const tableRows = useMemo(() => {
+        const rows = sortedData.map(item => {
+            const value = isFinancial ? item[activeMetric] || 0 : item.total || 0;
+            return {
+                ...item,
+                subject: item.label,
+                quantity: item.count || 0,
+                pct_quantity: totalCount ? (item.count || 0) / totalCount : 0,
+                value,
+                pct_value: totalValue ? value / totalValue : 0
+            };
+        });
+        const direction = tableSort.direction === 'asc' ? 1 : -1;
+        return rows.sort((a, b) => {
+            if (tableSort.field === 'subject') return direction * String(a.subject).localeCompare(String(b.subject), 'pt-BR');
+            return direction * ((a[tableSort.field] || 0) - (b[tableSort.field] || 0));
+        });
+    }, [sortedData, isFinancial, activeMetric, totalCount, totalValue, tableSort]);
+
+    const tableExportColumns = [
+        { header: subjectLabel, key: 'subject' },
+        { header: 'QUANTIDADE', key: 'quantity' },
+        { header: '% QTD', key: 'pct_quantity', isPercent: true },
+        { header: 'VALOR', key: 'value', isCurrency: true },
+        { header: '% VALOR', key: 'pct_value', isPercent: true }
+    ];
+    const handleTableSort = (field) => setTableSort(previous => ({
+        field,
+        direction: previous.field === field && previous.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    const sortMark = (field) => tableSort.field === field ? (tableSort.direction === 'asc' ? ' ▲' : ' ▼') : '';
 
     const pieData = {
-        labels: cleanData.map(d => d.label),
+        labels: chartData.map(d => d.label),
         datasets: [{
             label: isFinancial ? currentMetricName : 'QTD Contratos',
-            data: cleanData.map(d => d[activeMetric]),
-            backgroundColor: cleanData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : pieColors[i % pieColors.length]),
+            data: chartData.map(d => d[activeMetric]),
+            backgroundColor: chartData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : pieColors[i % pieColors.length]),
             borderWidth: 1,
             borderColor: '#ffffff'
         }]
@@ -656,9 +850,9 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
                         return context[0]?.label || '';
                     },
                     label: function(context) {
-                        const item = cleanData[context.dataIndex];
+                        const item = chartData[context.dataIndex];
                         const value = isFinancial ? item[activeMetric] || 0 : item.total || 0;
-                        const shareBase = isFinancial ? displayedTotal : cleanData.reduce((sum, row) => sum + (row.count || 0), 0);
+                        const shareBase = isFinancial ? displayedTotal : totalCount;
                         const shareValue = isFinancial ? item[activeMetric] || 0 : item.count || 0;
                         return [
                             `Valor: ${formatBRL(value)}`,
@@ -672,9 +866,9 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
                 position: 'bottom', 
                 align: 'center',
                 labels: { 
-                    boxWidth: cleanData.length > 6 ? 6 : 10,
-                    padding: cleanData.length > 6 ? 8 : 12,
-                    font: { size: cleanData.length > 6 ? 8 : 10 },
+                    boxWidth: chartData.length > 6 ? 6 : 10,
+                    padding: chartData.length > 6 ? 8 : 12,
+                    font: { size: chartData.length > 6 ? 8 : 10 },
                     generateLabels: function(chart) {
                         const data = chart.data;
                         if (data.labels.length && data.datasets.length) {
@@ -726,8 +920,8 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
         labels: chartLabels,
         datasets: [{
             label: isFinancial ? currentMetricName : 'Quantidade',
-            data: cleanData.map(d => d[activeMetric]),
-            backgroundColor: cleanData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : (isFinancial ? '#3b82f6' : '#f97316')),
+            data: chartData.map(d => d[activeMetric]),
+            backgroundColor: chartData.map((d, i) => d.label.trim() === 'OUTROS' ? '#94a3b8' : (isFinancial ? '#3b82f6' : '#f97316')),
             borderRadius: 4
         }]
     };
@@ -741,12 +935,12 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
             tooltip: {
                 callbacks: {
                     title: function(context) {
-                        return cleanData[context[0]?.dataIndex]?.label || '';
+                        return chartData[context[0]?.dataIndex]?.label || '';
                     },
                     label: function(context) {
-                        const item = cleanData[context.dataIndex];
+                        const item = chartData[context.dataIndex];
                         const value = isFinancial ? item[activeMetric] || 0 : item.total || 0;
-                        const shareBase = isFinancial ? displayedTotal : cleanData.reduce((sum, row) => sum + (row.count || 0), 0);
+                        const shareBase = isFinancial ? displayedTotal : totalCount;
                         const shareValue = isFinancial ? item[activeMetric] || 0 : item.count || 0;
                         return [
                             `Valor: ${formatBRL(value)}`,
@@ -817,7 +1011,7 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
                         </select>
                     )}
                     <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded hidden sm:inline-block">
-                        {currentViewLabel}: {cleanData.length}
+                        {currentViewLabel}: {viewMode === 'table' ? tableRows.length : chartData.length}
                     </span>
                     <button onClick={() => setViewMode(nextViewMode)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer">
                         {nextViewLabel}
@@ -826,42 +1020,118 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
             </div>
             <div className="w-full flex-1 flex flex-col min-h-[300px] relative">
                 {viewMode === 'table' ? (
-                    <div className="absolute inset-0 overflow-auto rounded-lg border border-slate-200">
+                    <div className="absolute inset-0 flex flex-col overflow-hidden rounded-lg border border-slate-200">
+                        <div className="flex shrink-0 justify-end gap-2 border-b border-slate-200 bg-slate-800 p-2">
+                            <button onClick={() => exportTable.toExcel(tableRows, `${id}_${currentMetricName}`, tableExportColumns)} className="rounded bg-green-600 px-3 py-1 text-[9px] font-black text-white hover:bg-green-500">EXCEL</button>
+                            <button onClick={() => exportTable.toCSV(tableRows, `${id}_${currentMetricName}`, tableExportColumns)} className="rounded bg-blue-600 px-3 py-1 text-[9px] font-black text-white hover:bg-blue-500">CSV</button>
+                            <button onClick={() => exportTable.toPDF(tableRows, `${id}_${currentMetricName}`, tableExportColumns, displayTitle)} className="rounded bg-red-600 px-3 py-1 text-[9px] font-black text-white hover:bg-red-500">PDF</button>
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-auto">
                         <table className="w-full text-[10px]">
                             <thead className="sticky top-0 bg-slate-100 text-slate-700 uppercase">
                                 <tr>
-                                    <th className="p-2 text-left">Assunto</th>
-                                    <th className="p-2 text-right">Quantidade</th>
-                                    <th className="p-2 text-right">Valor</th>
-                                    <th className="p-2 text-right">%</th>
+                                    <th className="p-2 text-left"><button onClick={() => handleTableSort('subject')} className="w-full text-left font-black" title="Ordenar crescente/decrescente">{subjectLabel}{sortMark('subject')}</button></th>
+                                    <th className="p-2 text-right"><button onClick={() => handleTableSort('quantity')} className="w-full text-right font-black" title="Ordenar crescente/decrescente">Quantidade{sortMark('quantity')}</button></th>
+                                    <th className="p-2 text-right"><button onClick={() => handleTableSort('pct_quantity')} className="w-full text-right font-black" title="Ordenar crescente/decrescente">% QTD{sortMark('pct_quantity')}</button></th>
+                                    <th className="p-2 text-right"><button onClick={() => handleTableSort('value')} className="w-full text-right font-black" title="Ordenar crescente/decrescente">Valor{sortMark('value')}</button></th>
+                                    <th className="p-2 text-right"><button onClick={() => handleTableSort('pct_value')} className="w-full text-right font-black" title="Ordenar crescente/decrescente">% Valor{sortMark('pct_value')}</button></th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {cleanData.map((item, index) => {
-                                    const shareValue = isFinancial ? item[activeMetric] || 0 : item.count || 0;
-                                    const shareBase = isFinancial ? displayedTotal : cleanData.reduce((sum, row) => sum + (row.count || 0), 0);
-                                    const value = isFinancial ? item[activeMetric] || 0 : item.total || 0;
-                                    return (
+                                {tableRows.map((item, index) => (
                                         <tr key={`${id}-table-${index}`} className="hover:bg-blue-50">
-                                            <td className="p-2 font-bold text-slate-700 break-words" title={item.label}>{item.label}</td>
-                                            <td className="p-2 text-right tabular-nums">{(item.count || 0).toLocaleString('pt-BR')}</td>
-                                            <td className="p-2 text-right tabular-nums font-bold">{formatBRL(value)}</td>
-                                            <td className="p-2 text-right tabular-nums">{shareBase ? formatPercentBR(shareValue / shareBase) : '0,00%'}</td>
+                                            <td className="p-2 font-bold text-slate-700 break-words" title={item.tooltip || item.fullLabel || item.subject}>{item.subject}</td>
+                                            <td className="p-2 text-right tabular-nums">{item.quantity.toLocaleString('pt-BR')}</td>
+                                            <td className="p-2 text-right tabular-nums">{formatPercentBR(item.pct_quantity)}</td>
+                                            <td className="p-2 text-right tabular-nums font-bold">{formatBRL(item.value)}</td>
+                                            <td className="p-2 text-right tabular-nums">{formatPercentBR(item.pct_value)}</td>
                                         </tr>
-                                    );
-                                })}
+                                ))}
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 ) : (
                 <div className="absolute inset-0">
                     {viewMode === 'pie' ? (
-                        <ChartComponent id={`pie-${id}`} type="pie" data={pieData} options={pieOptions} />
+                        <ChartComponent id={`pie-${id}`} type="pie" data={pieData} options={pieOptions} exportTitle={displayTitle} />
                     ) : (
-                        <ChartComponent id={`bar-${id}`} type="bar" data={barData} options={barOptions} />
+                        <ChartComponent id={`bar-${id}`} type="bar" data={barData} options={barOptions} exportTitle={displayTitle} />
                     )}
                 </div>
                 )}
+            </div>
+        </div>
+    );
+}
+
+function ChartTableToggle({ isTable, onToggle }) {
+    return (
+        <button type="button" onClick={onToggle} className="rounded border border-blue-200 bg-blue-50 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-blue-600 shadow-sm transition hover:bg-blue-100">
+            {isTable ? '▥ GRÁFICO' : '▦ TABELA'}
+        </button>
+    );
+}
+
+function SortableChartTable({ id, title, rows, columns, initialSortKey }) {
+    const [sort, setSort] = useState({ key: initialSortKey || columns[0]?.key, direction: 'desc' });
+    const sortedRows = useMemo(() => {
+        const column = columns.find(item => item.key === sort.key) || columns[0];
+        const direction = sort.direction === 'asc' ? 1 : -1;
+        return [...rows].sort((a, b) => {
+            const valueA = column?.sortValue ? column.sortValue(a) : a[column?.key];
+            const valueB = column?.sortValue ? column.sortValue(b) : b[column?.key];
+            if (typeof valueA === 'number' || typeof valueB === 'number') return direction * ((Number(valueA) || 0) - (Number(valueB) || 0));
+            return direction * String(valueA || '').localeCompare(String(valueB || ''), 'pt-BR');
+        });
+    }, [rows, columns, sort]);
+    const toggleSort = (key) => setSort(previous => ({
+        key,
+        direction: previous.key === key && previous.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    const sortMark = (key) => sort.key === key ? (sort.direction === 'asc' ? ' ▲' : ' ▼') : '';
+    const displayValue = (row, column) => {
+        if (column.render) return column.render(row);
+        const value = column.format ? column.format(row) : row[column.key];
+        if (value === null || value === undefined || value === '') return '-';
+        if (column.isCurrency) return formatBRL(value);
+        if (column.isPercent) return formatPercentBR(value);
+        if (typeof value === 'number') return value.toLocaleString('pt-BR');
+        return value;
+    };
+    const exportColumns = columns.map(({ render, sortValue, ...column }) => column);
+    return (
+        <div className="flex h-full min-h-[300px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <div className="flex shrink-0 flex-wrap justify-end gap-2 border-b border-slate-200 bg-slate-800 p-2">
+                <button onClick={() => exportTable.toExcel(sortedRows, id, exportColumns)} className="rounded bg-green-600 px-3 py-1 text-[9px] font-black text-white hover:bg-green-500">EXCEL</button>
+                <button onClick={() => exportTable.toCSV(sortedRows, id, exportColumns)} className="rounded bg-blue-600 px-3 py-1 text-[9px] font-black text-white hover:bg-blue-500">CSV</button>
+                <button onClick={() => exportTable.toPDF(sortedRows, id, exportColumns, title)} className="rounded bg-red-600 px-3 py-1 text-[9px] font-black text-white hover:bg-red-500">PDF</button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto">
+                <table className="w-full border-collapse text-[10px]">
+                    <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700 uppercase shadow-sm">
+                        <tr>
+                            {columns.map(column => (
+                                <th key={column.key} className={`whitespace-nowrap p-2 ${column.align === 'left' ? 'text-left' : 'text-right'}`}>
+                                    <button onClick={() => toggleSort(column.key)} className={`w-full font-black ${column.align === 'left' ? 'text-left' : 'text-right'}`} title="Ordenar crescente/decrescente">
+                                        {column.header}{sortMark(column.key)}
+                                    </button>
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {sortedRows.map((row, rowIndex) => (
+                            <tr key={`${id}-row-${rowIndex}`} className="hover:bg-blue-50">
+                                {columns.map((column, columnIndex) => (
+                                    <td key={column.key} className={`p-2 tabular-nums ${columnIndex === 0 || column.align === 'left' ? 'text-left' : 'text-right'} ${columnIndex === 0 ? 'font-bold text-slate-700' : ''}`} title={columnIndex === 0 ? (row._tooltip || String(row[column.key] || '')) : undefined}>
+                                        {displayValue(row, column)}
+                                    </td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
             </div>
         </div>
     );
@@ -1069,7 +1339,7 @@ function AccessMetadata() {
     }).format(currentDateTime);
 
     return (
-        <div className="min-w-[245px] text-[11px] font-bold leading-5 text-slate-600 whitespace-nowrap">
+        <div data-access-metadata data-access-location={accessLocation} className="min-w-[245px] text-[11px] font-bold leading-5 text-slate-600 whitespace-nowrap">
             <p title="Localização aproximada obtida pelo IP de acesso">{accessLocation} – {datePart}; {timePart}</p>
             <p>Versão {DASH_VERSION}</p>
             <p className="italic">Produzido por Cel Brito</p>
@@ -1118,11 +1388,16 @@ function Dashboard() {
 
     const [gestorChartSort, setGestorChartSort] = useState('emp_tit');
     const [fiscalChartSort, setFiscalChartSort] = useState('emp_tit');
+    const [chartTableViews, setChartTableViews] = useState({
+        gestor: false, fiscal: false, top20: false, top20100: false,
+        ano: false, contrato: false, correlacao: false
+    });
 
     const [fornecedorSort, setFornecedorSort] = useState('valor_desc');
     const [contratoSort, setContratoSort] = useState('valor_desc');
-    const [scatterXAxis, setScatterXAxis] = useState('p_executado');
+    const [scatterXAxis, setScatterXAxis] = useState('p_recebido');
     const [scatterHiddenTags, setScatterHiddenTags] = useState([]);
+    const toggleChartTableView = (key) => setChartTableViews(previous => ({ ...previous, [key]: !previous[key] }));
     
     // Novos Estados de Filtros
     const [fFiscal, setFFiscal] = useState([]);
@@ -1142,10 +1417,7 @@ function Dashboard() {
     
     const [dInicDe, setDInicDe] = useState("");
     const [dInicAte, setDInicAte] = useState("");
-    const [dFimDe, setDFimDe] = useState(() => {
-        const d = new Date();
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    });
+    const [dFimDe, setDFimDe] = useState("");
     const [dFimAte, setDFimAte] = useState("");
 
     const [searchContrato, setSearchContrato] = useState("");
@@ -1159,7 +1431,7 @@ function Dashboard() {
     const [searchNd, setSearchNd] = useState("");
 
     const [showMasterColsMenu, setShowMasterColsMenu] = useState(false);
-    const [expandedBudgetContracts, setExpandedBudgetContracts] = useState([]);
+    const [expandedBudgetDimensions, setExpandedBudgetDimensions] = useState({});
     const financeTableRef = useRef(null);
     const masterColumnLabels = {
         contrato: "CONTRATO", situacao: "SITUAÇÃO", secLog: "SEC LOG", fornecedor: "FORNECEDOR", objeto: "OBJETO", gestorFiscal: "GESTORES/FISCAIS",
@@ -1196,10 +1468,18 @@ function Dashboard() {
     const initialDateFilters = { data_inic: {min:'', max:''}, data_fim: {min:'', max:''} };
     const [dateFilters, setDateFilters] = useState(initialDateFilters);
 
-    const toggleBudgetContract = (contract) => {
-        setExpandedBudgetContracts(previous => previous.includes(contract)
-            ? previous.filter(item => item !== contract)
-            : [...previous, contract]);
+    const toggleBudgetDimension = (contract, dimension) => {
+        setExpandedBudgetDimensions(previous => {
+            const current = previous[contract] || [];
+            const next = current.includes(dimension)
+                ? current.filter(item => item !== dimension)
+                : [...current, dimension];
+            next.sort((a, b) => ['ao', 'po', 'nd'].indexOf(a) - ['ao', 'po', 'nd'].indexOf(b));
+            const updated = { ...previous };
+            if (next.length) updated[contract] = next;
+            else delete updated[contract];
+            return updated;
+        });
     };
 
     // TAGs System para Ações Rápidas
@@ -1236,30 +1516,41 @@ function Dashboard() {
     const thirtyDaysAgoStr = getOffsetDateStr(-30);
     const sevenDaysAheadStr = getOffsetDateStr(7);
     const thirtyDaysAheadStr = getOffsetDateStr(30);
-    const isHojeActive = dFimDe === todayStr && !dFimAte;
-    const isVencendo7Active = dFimDe === todayStr && dFimAte === sevenDaysAheadStr;
-    const isVencendo30Active = dFimDe === todayStr && dFimAte === thirtyDaysAheadStr;
-    const isSevenActive = dFimDe === sevenDaysAgoStr && !dFimAte;
-    const isThirtyActive = dFimDe === thirtyDaysAgoStr && !dFimAte;
-    const toggleHoje = () => {
-        if (isHojeActive) { setDFimDe(""); setDFimAte(""); }
-        else { setDFimDe(todayStr); setDFimAte(""); }
+    const isVigentesActive = !dInicDe && dInicAte === todayStr && dFimDe === todayStr && !dFimAte;
+    const isVencendo7Active = !dInicDe && !dInicAte && dFimDe === todayStr && dFimAte === sevenDaysAheadStr;
+    const isVencendo30Active = !dInicDe && !dInicAte && dFimDe === todayStr && dFimAte === thirtyDaysAheadStr;
+    const isSevenActive = !dInicDe && !dInicAte && dFimDe === sevenDaysAgoStr && !dFimAte;
+    const isThirtyActive = !dInicDe && !dInicAte && dFimDe === thirtyDaysAgoStr && !dFimAte;
+    const isVencidos7Active = !dInicDe && !dInicAte && dFimDe === sevenDaysAgoStr && dFimAte === todayStr;
+    const isVencidos30Active = !dInicDe && !dInicAte && dFimDe === thirtyDaysAgoStr && dFimAte === todayStr;
+    const clearQuickDateFilters = () => { setDInicDe(""); setDInicAte(""); setDFimDe(""); setDFimAte(""); };
+    const toggleVigentes = () => {
+        if (isVigentesActive) clearQuickDateFilters();
+        else { setDInicDe(""); setDInicAte(todayStr); setDFimDe(todayStr); setDFimAte(""); }
     };
     const toggleVencendo7 = () => {
-        if (isVencendo7Active) { setDFimDe(""); setDFimAte(""); }
-        else { setDFimDe(todayStr); setDFimAte(sevenDaysAheadStr); }
+        if (isVencendo7Active) clearQuickDateFilters();
+        else { setDInicDe(""); setDInicAte(""); setDFimDe(todayStr); setDFimAte(sevenDaysAheadStr); }
     };
     const toggleVencendo30 = () => {
-        if (isVencendo30Active) { setDFimDe(""); setDFimAte(""); }
-        else { setDFimDe(todayStr); setDFimAte(thirtyDaysAheadStr); }
+        if (isVencendo30Active) clearQuickDateFilters();
+        else { setDInicDe(""); setDInicAte(""); setDFimDe(todayStr); setDFimAte(thirtyDaysAheadStr); }
     };
     const toggleSevenDays = () => {
-        if (isSevenActive) { setDFimDe(""); setDFimAte(""); }
-        else { setDFimDe(sevenDaysAgoStr); setDFimAte(""); }
+        if (isSevenActive) clearQuickDateFilters();
+        else { setDInicDe(""); setDInicAte(""); setDFimDe(sevenDaysAgoStr); setDFimAte(""); }
     };
     const toggleThirtyDays = () => {
-        if (isThirtyActive) { setDFimDe(""); setDFimAte(""); }
-        else { setDFimDe(thirtyDaysAgoStr); setDFimAte(""); }
+        if (isThirtyActive) clearQuickDateFilters();
+        else { setDInicDe(""); setDInicAte(""); setDFimDe(thirtyDaysAgoStr); setDFimAte(""); }
+    };
+    const toggleVencidos7 = () => {
+        if (isVencidos7Active) clearQuickDateFilters();
+        else { setDInicDe(""); setDInicAte(""); setDFimDe(sevenDaysAgoStr); setDFimAte(todayStr); }
+    };
+    const toggleVencidos30 = () => {
+        if (isVencidos30Active) clearQuickDateFilters();
+        else { setDInicDe(""); setDInicAte(""); setDFimDe(thirtyDaysAgoStr); setDFimAte(todayStr); }
     };
 
     const cSupItems = ["SGLS-CLASSE I", "SGLFE-CLASSE II", "SGLC-CLASSE III", "SGLME-CLASSE V (MUN)"];
@@ -1904,6 +2195,40 @@ function Dashboard() {
         return byContract;
     }, [filteredOrcamentarioDetails]);
 
+    const getSelectedBudgetDetails = (contract, dimensions) => {
+        if (!dimensions?.length) return [];
+        const grouped = {};
+        const metricKeys = ['v_empenhado', 'v_recebido', 'v_liquidado', 'v_a_liquidar', 'v_pago', 'v_a_pagar', 'v_bloqueado', 'v_cancelado', 'v_executado'];
+        (budgetBreakdownByContract[contract] || []).forEach(detail => {
+            const key = dimensions.map(dimension => detail[`${dimension}_codigo`] || 'N/I').join('|');
+            if (!grouped[key]) {
+                grouped[key] = {
+                    ao_codigo: dimensions.includes('ao') ? detail.ao_codigo : '',
+                    ao_nome: dimensions.includes('ao') ? detail.ao_nome : '',
+                    po_codigo: dimensions.includes('po') ? detail.po_codigo : '',
+                    po_nome: dimensions.includes('po') ? detail.po_nome : '',
+                    nd_codigo: dimensions.includes('nd') ? detail.nd_codigo : '',
+                    nd_nome: dimensions.includes('nd') ? detail.nd_nome : '',
+                    _dimensions: dimensions,
+                    ...Object.fromEntries(metricKeys.map(metric => [metric, 0]))
+                };
+            }
+            metricKeys.forEach(metric => { grouped[key][metric] += detail[metric] || 0; });
+        });
+        return Object.values(grouped).map(item => ({
+            ...item,
+            p_recebido: item.v_empenhado ? item.v_recebido / item.v_empenhado : 0,
+            p_liquidado: item.v_empenhado ? item.v_liquidado / item.v_empenhado : 0,
+            p_a_liquidar: item.v_empenhado ? item.v_a_liquidar / item.v_empenhado : 0,
+            p_pago: item.v_empenhado ? item.v_pago / item.v_empenhado : 0,
+            p_a_pagar: item.v_empenhado ? item.v_a_pagar / item.v_empenhado : 0,
+            p_bloqueado: item.v_empenhado ? item.v_bloqueado / item.v_empenhado : 0,
+            p_cancelado: item.v_empenhado ? item.v_cancelado / item.v_empenhado : 0,
+            p_executado: item.v_empenhado ? item.v_executado / item.v_empenhado : 0,
+            p_exec_liq: item.v_empenhado ? item.v_pago / item.v_empenhado : 0
+        })).sort((a, b) => dimensions.map(dimension => a[`${dimension}_codigo`]).join('|').localeCompare(dimensions.map(dimension => b[`${dimension}_codigo`]).join('|'), 'pt-BR'));
+    };
+
     // Autofit real das colunas de INÍCIO até a última métrica visível.
     useEffect(() => {
         const frameId = requestAnimationFrame(() => {
@@ -1912,28 +2237,34 @@ function Dashboard() {
 
             const metricHeaders = Array.from(table.querySelectorAll('thead th:not(.master-text-col)'));
             metricHeaders.forEach(header => {
+                if (header.dataset.userSized === 'true') return;
                 const columnIndex = header.cellIndex;
                 const cells = [
                     header,
-                    ...Array.from(table.querySelectorAll('tbody tr, tfoot tr')).map(row => row.cells[columnIndex]).filter(Boolean)
+                    ...Array.from(table.querySelectorAll('tbody tr:not(.budget-detail-row)'))
+                        .map(row => Array.from(row.cells).find(cell => cell.cellIndex === columnIndex && cell.colSpan === 1))
+                        .filter(Boolean)
                 ];
 
                 cells.forEach(cell => {
                     cell.style.width = 'auto';
-                    cell.style.minWidth = '0';
+                    cell.style.minWidth = '40px';
+                    cell.style.maxWidth = 'none';
+                    cell.style.whiteSpace = 'nowrap';
+                    cell.style.overflowWrap = 'normal';
                 });
 
                 const contentWidth = cells.reduce((maxWidth, cell) => Math.max(maxWidth, cell.scrollWidth + 6), 0);
                 const fittedWidth = Math.max(72, contentWidth);
                 cells.forEach(cell => {
                     cell.style.width = `${fittedWidth}px`;
-                    cell.style.minWidth = `${fittedWidth}px`;
+                    cell.style.minWidth = '40px';
                 });
             });
         });
 
         return () => cancelAnimationFrame(frameId);
-    }, [filteredData, masterVisibleCols, expandedBudgetContracts]);
+    }, [filteredData, masterVisibleCols, expandedBudgetDimensions]);
 
     const totalsMaster = useMemo(() => {
         let global = 0, dif = 0, emp = 0, rec = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
@@ -2062,16 +2393,21 @@ function Dashboard() {
         filteredOrcamentarioDetails.forEach(detail => {
             const rawLabel = detail[dimensionKey] && detail[dimensionKey] !== '-' ? detail[dimensionKey] : 'N/I';
             const labels = dimensionKey === 'nd_codigo' ? splitBudgetDimensionValue(rawLabel) : [rawLabel];
+            const nameKey = dimensionKey.replace('_codigo', '_nome');
+            const rawName = detail[nameKey] && detail[nameKey] !== '-' ? detail[nameKey] : 'N/I';
+            const names = dimensionKey === 'nd_codigo' ? splitBudgetDimensionValue(rawName) : [rawName];
             const normalizedLabels = labels.length ? labels : ['N/I'];
             const allocation = 1 / normalizedLabels.length;
-            normalizedLabels.forEach(label => {
+            normalizedLabels.forEach((label, index) => {
+                const dimensionName = names[index] || (names.length === 1 ? names[0] : 'N/I');
                 if (!map[label]) map[label] = {
-                    label, contracts: new Set(), total: 0, recebido: 0, a_receber: 0,
+                    label, contracts: new Set(), descriptions: new Set(), total: 0, recebido: 0, a_receber: 0,
                     liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0,
                     bloqueado: 0, cancelado: 0, executado: 0
                 };
                 const target = map[label];
                 target.contracts.add(detail.contrato);
+                target.descriptions.add(`${label} – ${dimensionName}`);
                 target.total += (detail.v_empenhado || 0) * allocation;
                 target.recebido += (detail.v_recebido || 0) * allocation;
                 target.a_receber += ((detail.v_empenhado || 0) - (detail.v_recebido || 0)) * allocation;
@@ -2084,7 +2420,11 @@ function Dashboard() {
                 target.executado += (detail.v_executado || 0) * allocation;
             });
         });
-        return Object.values(map).map(item => ({ ...item, count: item.contracts.size }));
+        return Object.values(map).map(item => ({
+            ...item,
+            count: item.contracts.size,
+            tooltip: Array.from(item.descriptions).join('\n')
+        }));
     };
 
     const modData = getPieDataFull('modalidade');
@@ -2145,7 +2485,7 @@ function Dashboard() {
         </>
     );
 
-    const buildTop20Data = (viewMode, sortKey) => {
+    const buildTop20Data = (viewMode, sortKey, limit = 20) => {
         const map = {};
         const budgetDimensionMap = { ao_codigo: 'ao_codigo', nd_codigo: 'nd_codigo', pi_codigo: 'pi_codigo' };
         const budgetDimensionKey = budgetDimensionMap[viewMode];
@@ -2154,12 +2494,17 @@ function Dashboard() {
             filteredOrcamentarioDetails.forEach(detail => {
                 const rawKey = detail[budgetDimensionKey] || 'N/I';
                 const keys = budgetDimensionKey === 'nd_codigo' ? splitBudgetDimensionValue(rawKey) : [rawKey];
+                const nameKey = budgetDimensionKey.replace('_codigo', '_nome');
+                const rawName = detail[nameKey] || 'N/I';
+                const names = budgetDimensionKey === 'nd_codigo' ? splitBudgetDimensionValue(rawName) : [rawName];
                 const normalizedKeys = keys.length ? keys : ['N/I'];
                 const allocation = 1 / normalizedKeys.length;
-                normalizedKeys.forEach(key => {
-                    if (!map[key]) map[key] = { label: key, contracts: new Set(), global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: '' };
+                normalizedKeys.forEach((key, index) => {
+                    const dimensionName = names[index] || (names.length === 1 ? names[0] : 'N/I');
+                    if (!map[key]) map[key] = { label: key, contracts: new Set(), descriptions: new Set(), global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: '' };
                     const target = map[key];
                     target.contracts.add(detail.contrato);
+                    target.descriptions.add(`${key} – ${dimensionName}`);
                     target.total += (detail.v_empenhado || 0) * allocation;
                     target.recebido += (detail.v_recebido || 0) * allocation;
                     target.liquidado += (detail.v_liquidado || 0) * allocation;
@@ -2174,7 +2519,7 @@ function Dashboard() {
         } else {
             filteredData.forEach(item => {
                 const key = getTop20Key(item, viewMode);
-                if (!map[key]) map[key] = { label: key, contracts: new Set(), global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
+                if (!map[key]) map[key] = { label: key, contracts: new Set(), global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor, tooltip: key };
                 const target = map[key];
                 target.contracts.add(item.contrato);
                 target.global += item.v_global || 0;
@@ -2194,6 +2539,7 @@ function Dashboard() {
         let arr = Object.values(map).map(item => ({
             ...item,
             count: item.contracts.size,
+            tooltip: item.descriptions ? Array.from(item.descriptions).join('\n') : item.tooltip,
             p_empenhado: item.global ? item.total / item.global : (totalEmpenhadoOrcamentario ? item.total / totalEmpenhadoOrcamentario : 0),
             p_recebido: item.total ? item.recebido / item.total : 0,
             p_liquidado: item.total ? item.liquidado / item.total : 0,
@@ -2204,7 +2550,7 @@ function Dashboard() {
             p_a_pagar: item.total ? Math.max(0, item.a_pagar) / item.total : 0
         }));
         sortTop20Array(arr, sortKey);
-        return arr.slice(0, 20);
+        return limit === null ? arr : arr.slice(0, limit);
     };
 
     const top20DataProcessed = useMemo(
@@ -2217,7 +2563,17 @@ function Dashboard() {
         [filteredData, filteredOrcamentarioDetails, top20100Sort, top20100ViewMode]
     );
 
-    const contratoChartData = useMemo(() => {
+    const top20AllDataProcessed = useMemo(
+        () => buildTop20Data(top20ViewMode, top20Sort, null),
+        [filteredData, filteredOrcamentarioDetails, top20Sort, top20ViewMode]
+    );
+
+    const top20100AllDataProcessed = useMemo(
+        () => buildTop20Data(top20100ViewMode, top20100Sort, null),
+        [filteredData, filteredOrcamentarioDetails, top20100Sort, top20100ViewMode]
+    );
+
+    const contratoAllData = useMemo(() => {
         let arr = [...filteredData];
         if (contratoSort === 'valor_desc') arr.sort((a, b) => b.v_empenhado - a.v_empenhado);
         else if (contratoSort === 'exec_desc') arr.sort((a, b) => b.p_executado - a.p_executado);
@@ -2228,8 +2584,9 @@ function Dashboard() {
             return vA - vB;
         });
         else if (contratoSort === 'nome_asc') arr.sort((a, b) => a.contrato.localeCompare(b.contrato));
-        return arr.slice(0, 20); 
+        return arr;
     }, [filteredData, contratoSort]);
+    const contratoChartData = useMemo(() => contratoAllData.slice(0, 20), [contratoAllData]);
 
     const dataByAno = useMemo(() => {
         let minYear = 9999;
@@ -2297,6 +2654,133 @@ function Dashboard() {
     const pQ3 = totalBubbles ? ((q3Normal / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
     const pQ4 = totalBubbles ? ((q4Otimo / totalBubbles) * 100).toFixed(1).replace('.', ',') + '%' : '0%';
 
+    const scatterMetricLabels = {
+        p_recebido: '% Recebido', p_liquidado: '% Liquidado',
+        p_pago: '% Pago', p_executado: '% Executado'
+    };
+    const top20SubjectLabels = {
+        fornecedor: 'FORNECEDOR', contrato: 'CONTRATO', ano: 'ANO', modalidade: 'MODALIDADE',
+        sec_log: 'SEC LOG', ao_codigo: 'AO CÓDIGO', nd_codigo: 'ND CÓDIGO', pi_codigo: 'PI CÓDIGO'
+    };
+    const buildPersonTableRows = (data) => {
+        const totalQuantity = data.reduce((sum, item) => sum + item.qtd_tit + item.qtd_sub, 0);
+        const totalValue = data.reduce((sum, item) => sum + item.emp_tit + item.emp_sub, 0);
+        return data.map(item => ({
+            ...item,
+            qtd_total: item.qtd_tit + item.qtd_sub,
+            pct_qtd: totalQuantity ? (item.qtd_tit + item.qtd_sub) / totalQuantity : 0,
+            emp_total: item.emp_tit + item.emp_sub,
+            pct_valor: totalValue ? (item.emp_tit + item.emp_sub) / totalValue : 0,
+            _tooltip: item.label
+        }));
+    };
+    const personTableColumns = (subject) => [
+        { header: subject, key: 'label', align: 'left' },
+        { header: 'QTD TITULAR', key: 'qtd_tit' }, { header: 'QTD SUBSTITUTO', key: 'qtd_sub' },
+        { header: 'QUANTIDADE', key: 'qtd_total' }, { header: '% QTD', key: 'pct_qtd', isPercent: true },
+        { header: 'EMP. TITULAR', key: 'emp_tit', isCurrency: true }, { header: 'EMP. SUBSTITUTO', key: 'emp_sub', isCurrency: true },
+        { header: 'EMPENHADO', key: 'emp_total', isCurrency: true }, { header: '% VALOR', key: 'pct_valor', isPercent: true }
+    ];
+    const gestorTableRows = buildPersonTableRows(gestorDataProcessed);
+    const fiscalTableRows = buildPersonTableRows(fiscalDataProcessed);
+
+    const buildTop20TableRows = (data, viewMode) => {
+        const totalQuantity = data.reduce((sum, item) => sum + item.count, 0);
+        const totalValue = data.reduce((sum, item) => sum + item.total, 0);
+        return data.map(item => ({
+            ...item,
+            subject: viewMode === 'fornecedor' ? item.label.replace(/^[\d\.\-\/]+\s*-\s*/, '') : item.label,
+            pct_qtd: totalQuantity ? item.count / totalQuantity : 0,
+            pct_valor: totalValue ? item.total / totalValue : 0,
+            a_liquidar_table: Math.max(0, item.a_liquidar),
+            a_pagar_table: Math.max(0, item.a_pagar),
+            p_empenhado_100: item.total ? 1 : 0,
+            _tooltip: item.tooltip || (viewMode === 'contrato' ? `Fornecedor: ${item.fornecedor}` : item.label)
+        }));
+    };
+    const top20TableRows = buildTop20TableRows(top20AllDataProcessed, top20ViewMode);
+    const top20100TableRows = buildTop20TableRows(top20100AllDataProcessed, top20100ViewMode);
+    const top20TableColumns = [
+        { header: top20SubjectLabels[top20ViewMode], key: 'subject', align: 'left' },
+        { header: 'QUANTIDADE', key: 'count' }, { header: '% QTD', key: 'pct_qtd', isPercent: true },
+        { header: 'EMPENHADO', key: 'total', isCurrency: true }, { header: '% VALOR', key: 'pct_valor', isPercent: true },
+        { header: 'RECEBIDO', key: 'recebido', isCurrency: true }, { header: 'LIQUIDADO', key: 'liquidado', isCurrency: true },
+        { header: 'PAGO', key: 'pago', isCurrency: true }, { header: 'BLOQUEADO', key: 'bloqueado', isCurrency: true },
+        { header: 'CANCELADO', key: 'cancelado', isCurrency: true }, { header: 'A LIQUIDAR', key: 'a_liquidar_table', isCurrency: true },
+        { header: 'A PAGAR', key: 'a_pagar_table', isCurrency: true }
+    ];
+    const top20100TableColumns = [
+        { header: top20SubjectLabels[top20100ViewMode], key: 'subject', align: 'left' },
+        { header: 'QUANTIDADE', key: 'count' }, { header: '% QTD', key: 'pct_qtd', isPercent: true },
+        { header: 'EMPENHADO', key: 'total', isCurrency: true }, { header: '% VALOR', key: 'pct_valor', isPercent: true },
+        { header: 'EMPENHADO (100 %)', key: 'p_empenhado_100', isPercent: true },
+        { header: 'RECEBIDO %', key: 'p_recebido', isPercent: true }, { header: 'LIQUIDADO %', key: 'p_liquidado', isPercent: true },
+        { header: 'A LIQUIDAR %', key: 'p_a_liquidar', isPercent: true }, { header: 'PAGO %', key: 'p_pago', isPercent: true },
+        { header: 'BLOQUEADO %', key: 'p_bloqueado', isPercent: true }, { header: 'CANCELADO %', key: 'p_cancelado', isPercent: true },
+        { header: 'A PAGAR %', key: 'p_a_pagar', isPercent: true }
+    ];
+
+    const totalsByYear = dataByAno.reduce((totals, item) => ({
+        iniciados: totals.iniciados + item.iniciados, encerrados: totals.encerrados + item.encerrados,
+        durante: totals.durante + item.durante, empenhado: totals.empenhado + item.empenhado
+    }), { iniciados: 0, encerrados: 0, durante: 0, empenhado: 0 });
+    const yearTableRows = dataByAno.map(item => ({
+        ...item,
+        p_iniciados: totalsByYear.iniciados ? item.iniciados / totalsByYear.iniciados : 0,
+        p_encerrados: totalsByYear.encerrados ? item.encerrados / totalsByYear.encerrados : 0,
+        p_durante: totalsByYear.durante ? item.durante / totalsByYear.durante : 0,
+        p_valor: totalsByYear.empenhado ? item.empenhado / totalsByYear.empenhado : 0,
+        _tooltip: String(item.label)
+    }));
+    const yearTableColumns = [
+        { header: 'ANO', key: 'label', align: 'left' },
+        { header: 'INICIADOS', key: 'iniciados' }, { header: '% INICIADOS', key: 'p_iniciados', isPercent: true },
+        { header: 'ENCERRADOS', key: 'encerrados' }, { header: '% ENCERRADOS', key: 'p_encerrados', isPercent: true },
+        { header: 'DURANTE', key: 'durante' }, { header: '% DURANTE', key: 'p_durante', isPercent: true },
+        { header: 'EMPENHADO', key: 'empenhado', isCurrency: true }, { header: '% VALOR', key: 'p_valor', isPercent: true }
+    ];
+
+    const contractTableValueTotal = contratoAllData.reduce((sum, item) => sum + item.v_empenhado, 0);
+    const contractTableRows = contratoAllData.map(item => ({
+        ...item,
+        pct_qtd: contratoAllData.length ? 1 / contratoAllData.length : 0,
+        pct_valor: contractTableValueTotal ? item.v_empenhado / contractTableValueTotal : 0,
+        _tooltip: `Objeto: ${item.objeto}\nFornecedor: ${item.fornecedor}`
+    }));
+    const contractTableColumns = [
+        { header: 'CONTRATO', key: 'contrato', align: 'left' }, { header: 'FORNECEDOR', key: 'fornecedor', align: 'left' },
+        { header: 'OBJETO', key: 'objeto', align: 'left' }, { header: 'QUANTIDADE', key: 'qtd_table', format: () => 1 },
+        { header: '% QTD', key: 'pct_qtd', isPercent: true }, { header: '% TEMPO', key: 'perc_tempo', isPercent: true },
+        { header: '% EXECUTADO', key: 'p_executado', isPercent: true }, { header: '% LIQUIDADO', key: 'p_liquidado', isPercent: true },
+        { header: '% EXEC. LÍQUIDA', key: 'p_pago', isPercent: true }, { header: 'EMPENHADO', key: 'v_empenhado', isCurrency: true },
+        { header: '% VALOR', key: 'pct_valor', isPercent: true }
+    ];
+
+    const scatterValueTotal = bubbleData.reduce((sum, item) => sum + item.v_empenhado, 0);
+    const scatterTableRows = bubbleData.map(item => ({
+        ...item,
+        qtd_table: 1,
+        pct_qtd: bubbleData.length ? 1 / bubbleData.length : 0,
+        pct_valor: scatterValueTotal ? item.v_empenhado / scatterValueTotal : 0,
+        p_axis: item.x / 100,
+        p_tempo_table: item.y / 100,
+        p_recebido_table: item.v_empenhado ? item.v_recebido / item.v_empenhado : 0,
+        p_liquidado_table: item.v_empenhado ? item.v_liquidado / item.v_empenhado : 0,
+        p_pago_table: item.v_empenhado ? item.v_pago / item.v_empenhado : 0,
+        _tooltip: `Objeto: ${item.objeto}\nFornecedor: ${item.fornecedor}\nSituação: ${item.situacao}`
+    }));
+    const scatterTableColumns = [
+        { header: 'CONTRATO', key: 'contrato', align: 'left' }, { header: 'OBJETO', key: 'objeto', align: 'left' },
+        { header: 'FORNECEDOR', key: 'fornecedor', align: 'left' }, { header: 'SITUAÇÃO', key: 'situacao', align: 'left' },
+        { header: 'QUANTIDADE', key: 'qtd_table' }, { header: '% QTD', key: 'pct_qtd', isPercent: true },
+        { header: 'EMPENHADO', key: 'v_empenhado', isCurrency: true }, { header: '% VALOR', key: 'pct_valor', isPercent: true },
+        { header: 'RECEBIDO', key: 'v_recebido', isCurrency: true }, { header: 'RECEBIDO %', key: 'p_recebido_table', isPercent: true },
+        { header: 'LIQUIDADO', key: 'v_liquidado', isCurrency: true }, { header: 'LIQUIDADO %', key: 'p_liquidado_table', isPercent: true },
+        { header: 'PAGO', key: 'v_pago', isCurrency: true }, { header: 'PAGO %', key: 'p_pago_table', isPercent: true },
+        { header: scatterMetricLabels[scatterXAxis].toUpperCase(), key: 'p_axis', isPercent: true },
+        { header: '% TEMPO', key: 'p_tempo_table', isPercent: true }
+    ];
+
     const masterNonMetricColCount = [
         'contrato', 'situacao', 'secLog', 'fornecedor', 'objeto', 'gestorFiscal', 'ao', 'po', 'nd', 'dataInic', 'dataFim', 'percTempo', 'diasPassaram', 'encerrandoDias'
     ].filter(k => masterVisibleCols[k]).length;
@@ -2346,16 +2830,16 @@ function Dashboard() {
 
     const renderBudgetDetailRow = (detail, key) => (
         <tr key={key} className="budget-detail-row border-t border-blue-100 bg-blue-50/60">
-            {masterLeadingTextColCount > 0 && <td colSpan={masterLeadingTextColCount} className="master-text-col p-3 text-[9px] font-black text-blue-700 uppercase tracking-wider">Detalhe AO–PO–ND</td>}
+            {masterLeadingTextColCount > 0 && <td colSpan={masterLeadingTextColCount} className="master-text-col p-3 text-[9px] font-black text-blue-700 uppercase tracking-wider">Detalhe {(detail._dimensions || ['ao', 'po', 'nd']).map(item => item.toUpperCase()).join('–')}</td>}
             {masterVisibleCols.dataInic && <td className="p-3 text-center text-slate-300">—</td>}
             {masterVisibleCols.dataFim && <td className="p-3 text-center text-slate-300">—</td>}
             {masterVisibleCols.percTempo && <td className="p-3 text-center text-slate-300">—</td>}
             {masterVisibleCols.diasPassaram && <td className="p-3 text-center text-slate-300">—</td>}
             {masterVisibleCols.encerrandoDias && <td className="p-3 text-center text-slate-300">—</td>}
-            {masterVisibleCols.ao && <td className="master-code-col p-3 font-black text-blue-800" title={`${detail.ao_nome} – ${detail.ao_codigo}`}>{detail.ao_codigo}</td>}
-            {masterVisibleCols.po && <td className="master-code-col p-3 font-black text-blue-800" title={`${detail.po_nome} – ${detail.po_codigo}`}>{detail.po_codigo}</td>}
-            {masterVisibleCols.nd && <td className="master-code-col p-3 font-black text-blue-800" title={`${detail.nd_nome} – ${detail.nd_codigo}`}>{detail.nd_codigo}</td>}
-            {masterVisibleCols.difGlobal && <td className="p-3 text-center text-[8px] font-black text-blue-700 uppercase">AO–PO–ND</td>}
+            {masterVisibleCols.ao && <td className="master-code-col p-3 font-black text-blue-800" title={detail.ao_codigo ? `${detail.ao_nome} – ${detail.ao_codigo}` : ''}>{detail.ao_codigo || '—'}</td>}
+            {masterVisibleCols.po && <td className="master-code-col p-3 font-black text-blue-800" title={detail.po_codigo ? `${detail.po_nome} – ${detail.po_codigo}` : ''}>{detail.po_codigo || '—'}</td>}
+            {masterVisibleCols.nd && <td className="master-code-col p-3 font-black text-blue-800" title={detail.nd_codigo ? `${detail.nd_nome} – ${detail.nd_codigo}` : ''}>{detail.nd_codigo || '—'}</td>}
+            {masterVisibleCols.difGlobal && <td className="p-3 text-center text-[8px] font-black text-blue-700 uppercase">{(detail._dimensions || ['ao', 'po', 'nd']).map(item => item.toUpperCase()).join('–')}</td>}
             {masterVisibleCols.vGlobal && <td className="p-3 text-center text-slate-300">—</td>}
             {masterVisibleCols.empenhado && <td className="p-3 text-right font-bold text-blue-700">{formatBRL(detail.v_empenhado)}</td>}
             {masterVisibleCols.recebido && <td className="p-3 text-right font-bold text-violet-700">{formatBRL(detail.v_recebido)}</td>}
@@ -2422,6 +2906,7 @@ function Dashboard() {
                 <div className="mb-4 pb-4 border-b border-slate-100 flex flex-col gap-3">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações Rápidas (Tempo e Status):</span>
                     <div className="flex flex-wrap gap-2 items-center">
+                        <button onClick={toggleVigentes} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVigentesActive ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VIGENTES</button>
                         <button onClick={toggleCSup} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isCSupActive ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>C SUP</button>
                         <button onClick={toggleNonCSup} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isNonCSupActive ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>- C SUP</button>
                         <button onClick={clearAllFilters} className="text-[9px] font-bold uppercase bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700 transition shadow-md border border-slate-800">Limpar Filtros</button>
@@ -2429,8 +2914,10 @@ function Dashboard() {
                     <div className="flex flex-wrap gap-2 items-center">
                         <button onClick={toggleVencendo7} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVencendo7Active ? 'bg-lime-600 text-white border-lime-600 ring-2 ring-lime-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VENCENDO EM 7 DIAS</button>
                         <button onClick={toggleVencendo30} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVencendo30Active ? 'bg-teal-600 text-white border-teal-600 ring-2 ring-teal-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VENCENDO EM 30 DIAS</button>
-                        <button onClick={toggleSevenDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isSevenActive ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR 7 DIAS ATRÁS</button>
-                        <button onClick={toggleThirtyDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isThirtyActive ? 'bg-orange-600 text-white border-orange-600 ring-2 ring-orange-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR 30 DIAS ATRÁS</button>
+                        <button onClick={toggleSevenDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isSevenActive ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR EXISTENTES HÁ 7 DIAS</button>
+                        <button onClick={toggleThirtyDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isThirtyActive ? 'bg-orange-600 text-white border-orange-600 ring-2 ring-orange-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR EXISTENTES HÁ 30 DIAS</button>
+                        <button onClick={toggleVencidos7} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVencidos7Active ? 'bg-rose-600 text-white border-rose-600 ring-2 ring-rose-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VENCIDOS HÁ 7 DIAS</button>
+                        <button onClick={toggleVencidos30} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVencidos30Active ? 'bg-red-700 text-white border-red-700 ring-2 ring-red-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VENCIDOS HÁ 30 DIAS</button>
                     </div>
                     <div className="flex flex-wrap gap-2 items-center">
                         {Object.entries(tagColorsMap).map(([label, config]) => {
@@ -2508,14 +2995,21 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
                         <h3 className="text-xs font-black text-slate-800 uppercase">Valor Empenhado e QTD por Gestor</h3>
-                        <select value={gestorChartSort} onChange={(e) => setGestorChartSort(e.target.value)} className="text-[9px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
-                            <option value="qtd_tit">QTD Titular</option>
-                            <option value="qtd_sub">QTD Substituto</option>
-                            <option value="emp_tit">Emp Titular</option>
-                            <option value="emp_sub">Emp Substituto</option>
-                            <option value="nome_asc">A-Z</option>
-                        </select>
+                        <div className="flex items-center gap-2">
+                            <select value={gestorChartSort} onChange={(e) => setGestorChartSort(e.target.value)} className="text-[9px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
+                                <option value="qtd_tit">QTD Titular</option>
+                                <option value="qtd_sub">QTD Substituto</option>
+                                <option value="emp_tit">Emp Titular</option>
+                                <option value="emp_sub">Emp Substituto</option>
+                                <option value="nome_asc">A-Z</option>
+                            </select>
+                            <ChartTableToggle isTable={chartTableViews.gestor} onToggle={() => toggleChartTableView('gestor')} />
+                        </div>
                     </div>
+                    <div className="h-[360px]">
+                    {chartTableViews.gestor ? (
+                        <SortableChartTable id="Tabela_Gestor" title="Valor Empenhado e QTD por Gestor" rows={gestorTableRows} columns={personTableColumns('GESTOR')} initialSortKey="emp_total" />
+                    ) : (
                     <ChartComponent id="gGestor" type="bar" data={{
                         labels: gestorDataProcessed.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
@@ -2524,19 +3018,28 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                             { label: 'Emp. Titular', data: gestorDataProcessed.map(d => d.emp_tit), backgroundColor: '#3b82f6', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
                             { label: 'Emp. Substituto', data: gestorDataProcessed.map(d => d.emp_sub), backgroundColor: '#93c5fd', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } }
                         ]
-                    }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 20, scaleID: 'x1' }, datalabels: { display: true }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
+                    }} options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 20, scaleID: 'x1' }, datalabels: { display: true }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
+                    )}
+                    </div>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
                         <h3 className="text-xs font-black text-slate-800 uppercase">Valor Empenhado e QTD por Fiscal</h3>
-                        <select value={fiscalChartSort} onChange={(e) => setFiscalChartSort(e.target.value)} className="text-[9px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
-                            <option value="qtd_tit">QTD Titular</option>
-                            <option value="qtd_sub">QTD Substituto</option>
-                            <option value="emp_tit">Emp Titular</option>
-                            <option value="emp_sub">Emp Substituto</option>
-                            <option value="nome_asc">A-Z</option>
-                        </select>
+                        <div className="flex items-center gap-2">
+                            <select value={fiscalChartSort} onChange={(e) => setFiscalChartSort(e.target.value)} className="text-[9px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
+                                <option value="qtd_tit">QTD Titular</option>
+                                <option value="qtd_sub">QTD Substituto</option>
+                                <option value="emp_tit">Emp Titular</option>
+                                <option value="emp_sub">Emp Substituto</option>
+                                <option value="nome_asc">A-Z</option>
+                            </select>
+                            <ChartTableToggle isTable={chartTableViews.fiscal} onToggle={() => toggleChartTableView('fiscal')} />
+                        </div>
                     </div>
+                    <div className="h-[360px]">
+                    {chartTableViews.fiscal ? (
+                        <SortableChartTable id="Tabela_Fiscal" title="Valor Empenhado e QTD por Fiscal" rows={fiscalTableRows} columns={personTableColumns('FISCAL')} initialSortKey="emp_total" />
+                    ) : (
                     <ChartComponent id="gFiscal" type="bar" data={{
                         labels: fiscalDataProcessed.map(d => formatLabelMultiLine(d.label)),
                         datasets: [
@@ -2545,7 +3048,9 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                             { label: 'Emp. Titular', data: fiscalDataProcessed.map(d => d.emp_tit), backgroundColor: '#22c55e', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#fff', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } },
                             { label: 'Emp. Substituto', data: fiscalDataProcessed.map(d => d.emp_sub), backgroundColor: '#86efac', xAxisID: 'x', stack: 'StackEmp', datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] > 0; }, color: '#1e293b', anchor: 'center', align: 'center', rotation: 0, font: { size: 9, weight: 'bold' }, formatter: v => shortenNumber(v) } }
                         ]
-                    }} options={{ indexAxis: 'y', responsive: true, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 10, scaleID: 'x1' }, datalabels: { display: true }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
+                    }} options={{ indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { tooltip: tooltipCallback, customLinePlugin: { x: 10, scaleID: 'x1' }, datalabels: { display: true }, legend: { labels: { font: { size: 9 }, boxWidth: 10 } } }, scales: { x: { stacked: true, ticks: { callback: v => shortenNumber(v) } }, x1: { stacked: true, position: 'top', grid: { display: false } }, y: { stacked: true } } }} />
+                    )}
+                    </div>
                 </div>
             </div>
 
@@ -2629,9 +3134,13 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 <option value="nd_codigo">VER POR ND CÓDIGO</option>
                                 <option value="pi_codigo">VER POR PI CÓDIGO</option>
                             </select>
+                            <ChartTableToggle isTable={chartTableViews.top20} onToggle={() => toggleChartTableView('top20')} />
                         </div>
                     </div>
                     <div className="h-[400px]">
+                        {chartTableViews.top20 ? (
+                            <SortableChartTable id="Tabela_Execucao_Orcamentaria_Top20" title="EXECUÇÃO ORÇAMENTÁRIA E QTD (TOP 20)" rows={top20TableRows} columns={top20TableColumns} initialSortKey="total" />
+                        ) : (
                         <ChartComponent id="gTop20" type="bar" data={{
                             labels: top20DataProcessed.map(d => formatLabelMultiLine(top20ViewMode === 'fornecedor' ? d.label.replace(/^[\d\.\-\/]+\s*-\s*/, '') : d.label)),
                             datasets: [
@@ -2679,6 +3188,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 y1: { position: 'right', grid: { display: false }, title: { display: true, text: 'Quantidade', font: { size: 8 } } } 
                             } 
                         }} />
+                        )}
                     </div>
                 </div>
             </div>
@@ -2702,9 +3212,13 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 <option value="nd_codigo">VER POR ND CÓDIGO</option>
                                 <option value="pi_codigo">VER POR PI CÓDIGO</option>
                             </select>
+                            <ChartTableToggle isTable={chartTableViews.top20100} onToggle={() => toggleChartTableView('top20100')} />
                         </div>
                     </div>
                     <div className="h-[400px]">
+                        {chartTableViews.top20100 ? (
+                            <SortableChartTable id="Tabela_Execucao_Orcamentaria_100_Top20" title="EXECUÇÃO ORÇAMENTÁRIA E QTD EM 100 % (TOP 20)" rows={top20100TableRows} columns={top20100TableColumns} initialSortKey="total" />
+                        ) : (
                         <ChartComponent id="gTop20100" type="bar" data={{
                             labels: top20100DataProcessed.map(d => formatLabelMultiLine(top20100ViewMode === 'fornecedor' ? d.label.replace(/^[\d\.\-\/]+\s*-\s*/, '') : d.label)),
                             datasets: [
@@ -2771,14 +3285,21 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 y1: { display: true, position: 'right', grid: { display: false }, title: { display: true, text: 'Quantidade', font: { size: 8 } }, grace: '10%', beginAtZero: true }
                             } 
                         }} />
+                        )}
                     </div>
                 </div>
             </div>
             
             <div className="max-w-[1600px] mx-auto mb-10">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                    <h3 className="text-xs font-black text-slate-800 uppercase mb-6">Contratos Iniciados/Encerrados por Ano e Valor Empenhado</h3>
+                    <div className="mb-6 flex items-center justify-between gap-2">
+                        <h3 className="text-xs font-black text-slate-800 uppercase">Contratos Iniciados/Encerrados por Ano e Valor Empenhado</h3>
+                        <ChartTableToggle isTable={chartTableViews.ano} onToggle={() => toggleChartTableView('ano')} />
+                    </div>
                     <div className="h-[400px]">
+                        {chartTableViews.ano ? (
+                            <SortableChartTable id="Tabela_Contratos_por_Ano" title="Contratos Iniciados/Encerrados por Ano e Valor Empenhado" rows={yearTableRows} columns={yearTableColumns} initialSortKey="label" />
+                        ) : (
                         <ChartComponent id="gAno" type="bar" data={{
                             labels: dataByAno.map(d => d.label),
                             datasets: [
@@ -2812,6 +3333,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 y_val: { type: 'linear', position: 'right', grid: { display: false }, ticks: { callback: v => shortenNumber(v) }, title: { display: true, text: 'Valor Empenhado (R$)', font: { weight: 'bold' } }, grace: '10%', beginAtZero: true } 
                             }
                         }} />
+                        )}
                     </div>
                 </div>
             </div>
@@ -2820,13 +3342,19 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                     <div className="flex justify-between items-center mb-6">
                         <h3 className="text-xs font-black text-slate-800 uppercase">Desempenho e Empenho por Contrato (Top 20)</h3>
-                        <select value={contratoSort} onChange={(e) => setContratoSort(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
-                            <option value="valor_desc">Maior Valor</option><option value="exec_desc">Maior Execução</option>
-                            <option value="tempo_desc">Maior Tempo</option><option value="dias_asc">Menos Dias Restantes</option>
-                            <option value="nome_asc">Ordem Alfabética</option>
-                        </select>
+                        <div className="flex items-center gap-2">
+                            <select value={contratoSort} onChange={(e) => setContratoSort(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-2 py-1 outline-none">
+                                <option value="valor_desc">Maior Valor</option><option value="exec_desc">Maior Execução</option>
+                                <option value="tempo_desc">Maior Tempo</option><option value="dias_asc">Menos Dias Restantes</option>
+                                <option value="nome_asc">Ordem Alfabética</option>
+                            </select>
+                            <ChartTableToggle isTable={chartTableViews.contrato} onToggle={() => toggleChartTableView('contrato')} />
+                        </div>
                     </div>
                     <div className="h-[400px]">
+                        {chartTableViews.contrato ? (
+                            <SortableChartTable id="Tabela_Desempenho_Contrato_Top20" title="Desempenho e Empenho por Contrato (Top 20)" rows={contractTableRows} columns={contractTableColumns} initialSortKey="v_empenhado" />
+                        ) : (
                         <ChartComponent id="gContrato" type="bar" data={{
                             labels: contratoChartData.map(d => formatLabelMultiLine(d.contrato)),
                             datasets: [
@@ -2867,6 +3395,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 y_val: { type: 'linear', position: 'right', grid: { display: false }, ticks: { callback: v => shortenNumber(v) }, grace: '10%', beginAtZero: true } 
                             }
                         }} />
+                        )}
                     </div>
                 </div>
             </div>
@@ -2876,7 +3405,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                     <div className="flex justify-between items-start mb-6">
                         <div className="flex flex-col gap-2">
                             <h3 className="text-xs font-black text-slate-800 uppercase">
-                                Correlação: {scatterXAxis === 'p_executado' ? '% Executado' : scatterXAxis === 'p_liquidado' ? '% Liquidado' : '% Pago'} vs % Tempo (Tamanho da bolha: Empenhado)
+                                Correlação: {scatterMetricLabels[scatterXAxis]} vs % Tempo (Tamanho da bolha: Empenhado)
                             </h3>
                             <div className="flex flex-wrap gap-2">
                                 <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-[9px] font-bold border border-slate-200">NORMAL (Q1): {q1Normal} ({pQ1})</span>
@@ -2885,13 +3414,20 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 <span className="bg-green-50 text-green-600 px-2 py-1 rounded text-[9px] font-bold border border-green-200">ÓTIMO (Q4): {q4Otimo} ({pQ4})</span>
                             </div>
                         </div>
-                        <select value={scatterXAxis} onChange={(e) => setScatterXAxis(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-3 py-1.5 outline-none mt-1 shrink-0">
-                            <option value="p_executado">% Executado</option>
-                            <option value="p_liquidado">% Liquidado</option>
-                            <option value="p_pago">% Pago</option>
-                        </select>
+                        <div className="mt-1 flex shrink-0 items-center gap-2">
+                            <select value={scatterXAxis} onChange={(e) => setScatterXAxis(e.target.value)} className="text-[10px] font-bold uppercase border border-slate-300 bg-slate-50 rounded px-3 py-1.5 outline-none">
+                                <option value="p_recebido">% Recebido</option>
+                                <option value="p_liquidado">% Liquidado</option>
+                                <option value="p_pago">% Pago</option>
+                                <option value="p_executado">% Executado</option>
+                            </select>
+                            <ChartTableToggle isTable={chartTableViews.correlacao} onToggle={() => toggleChartTableView('correlacao')} />
+                        </div>
                     </div>
                     <div className="h-[450px]">
+                        {chartTableViews.correlacao ? (
+                            <SortableChartTable id="Tabela_Correlacao_Execucao_Tempo" title={`Correlação: ${scatterMetricLabels[scatterXAxis]} vs % Tempo`} rows={scatterTableRows} columns={scatterTableColumns} initialSortKey="v_empenhado" />
+                        ) : (
                         <ChartComponent id="gScatter" type="bubble" data={{
                             datasets: [{
                                 label: 'Contratos',
@@ -2910,7 +3446,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                             },
                             scales: {
                                 x: { 
-                                    title: { display: true, text: scatterXAxis === 'p_executado' ? '% Executado' : scatterXAxis === 'p_liquidado' ? '% Liquidado' : '% Pago', font: { weight: 'bold' } }, 
+                                    title: { display: true, text: scatterMetricLabels[scatterXAxis], font: { weight: 'bold' } }, 
                                     min: -10, 
                                     max: 110,
                                     ticks: {
@@ -2941,6 +3477,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 }
                             }
                         }} />
+                        )}
                     </div>
                     {/* Legenda Customizada do Scatter Plot (Interativa) */}
                     <div className="mt-4 flex flex-wrap gap-3 justify-center border-t border-slate-100 pt-4">
@@ -3032,8 +3569,9 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {filteredData.slice(0, 100).map((row, i) => {
-                                const budgetDetails = budgetBreakdownByContract[row.contrato] || [];
-                                const budgetExpanded = expandedBudgetContracts.includes(row.contrato);
+                                const budgetSelection = expandedBudgetDimensions[row.contrato] || [];
+                                const budgetDetails = getSelectedBudgetDetails(row.contrato, budgetSelection);
+                                const hasBudgetDetails = (budgetBreakdownByContract[row.contrato] || []).length > 0;
                                 return (
                                 <React.Fragment key={`${row.contrato}-${i}`}>
                                 <tr className="hover:bg-blue-50 transition-colors">
@@ -3072,10 +3610,17 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                     {masterVisibleCols.po && <td className="master-code-col p-3 text-slate-600 font-bold" title={(row.po_filter_values || []).join('\n')}>{row.po_codigos}</td>}
                                     {masterVisibleCols.nd && <td className="master-code-col p-3 text-slate-600 font-bold" title={(row.nd_filter_values || []).join('\n')}>{row.nd_codigos}</td>}
                                     {masterVisibleCols.difGlobal && <td className={`p-3 text-right font-bold ${row.dif_global < 0 ? 'text-red-500' : (row.dif_global > 0 ? 'text-emerald-600' : 'text-slate-500')} bg-slate-50/30`}>
-                                        {budgetDetails.length > 0 && (
-                                            <button onClick={() => toggleBudgetContract(row.contrato)} className="mb-1 flex w-full items-center justify-end gap-1 text-[8px] font-black text-blue-700 hover:text-blue-900 uppercase" title="Expandir valores financeiros por AO–PO–ND" aria-expanded={budgetExpanded}>
-                                                <span>{budgetExpanded ? '▼' : '▶'}</span> AO–PO–ND
-                                            </button>
+                                        {hasBudgetDetails && (
+                                            <div className="mb-1 flex w-full flex-wrap items-center justify-end gap-1" aria-label="Selecionar dimensões do detalhamento orçamentário">
+                                                {['ao', 'po', 'nd'].map(dimension => {
+                                                    const active = budgetSelection.includes(dimension);
+                                                    return (
+                                                        <button key={dimension} onClick={() => toggleBudgetDimension(row.contrato, dimension)} className={`rounded border px-1.5 py-0.5 text-[8px] font-black uppercase transition ${active ? 'border-blue-700 bg-blue-700 text-white' : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'}`} title={`${active ? 'Ocultar' : 'Exibir'} detalhamento por ${dimension.toUpperCase()}`} aria-pressed={active}>
+                                                            {active ? '▼' : '▶'} {dimension.toUpperCase()}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
                                         )}
                                         {formatBRL(row.dif_global)}
                                     </td>}
@@ -3100,7 +3645,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                     {masterVisibleCols.execLiq && <td className="p-3 text-right font-black text-violet-600">{formatBRL(row.v_pago)}</td>}
                                     {masterVisibleCols.pExecLiq && <td className="p-3 text-center font-black text-violet-800 bg-violet-50/30">{formatPercentBR(row.p_pago)}</td>}
                                 </tr>
-                                {budgetExpanded && budgetDetails.map((detail, detailIndex) => renderBudgetDetailRow(detail, `${row.contrato}-orc-${detailIndex}`))}
+                                {budgetSelection.length > 0 && budgetDetails.map((detail, detailIndex) => renderBudgetDetailRow(detail, `${row.contrato}-orc-${budgetSelection.join('-')}-${detailIndex}`))}
                                 </React.Fragment>
                                 );
                             })}

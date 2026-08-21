@@ -26,12 +26,25 @@ body { font-family: 'Outfit', sans-serif; }
 .finance-detail-table .master-code-col {
     width: 1%;
     min-width: 9ch;
-    max-width: none;
-    white-space: nowrap;
+    max-width: 30ch;
+    white-space: normal;
+    overflow-wrap: anywhere;
     font-variant-numeric: tabular-nums;
 }
 .finance-detail-table .budget-detail-row td {
     box-shadow: inset 0 1px 0 rgba(147, 197, 253, 0.35);
+}
+.chart-export-host canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+.chart-export-actions {
+    opacity: 0.78;
+}
+.chart-export-host:hover .chart-export-actions,
+.chart-export-actions:focus-within {
+    opacity: 1;
 }
 ::-webkit-scrollbar { height: 8px; width: 8px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
