@@ -1,7 +1,7 @@
 /* Estilização Premium para as Barras de Scroll */
 body { font-family: 'Outfit', sans-serif; }
 
-/* Autofit: as colunas de INÍCIO em diante usam apenas a largura necessária. */
+/* Autofit: as colunas de INÍCIO em diante, inclusive AO/PO/ND, usam apenas a largura necessária. */
 .finance-detail-table {
     width: max-content;
     min-width: 100%;
@@ -22,6 +22,16 @@ body { font-family: 'Outfit', sans-serif; }
     white-space: normal;
     overflow-wrap: anywhere;
     word-break: normal;
+}
+.finance-detail-table .master-code-col {
+    width: 1%;
+    min-width: 9ch;
+    max-width: none;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.finance-detail-table .budget-detail-row td {
+    box-shadow: inset 0 1px 0 rgba(147, 197, 253, 0.35);
 }
 ::-webkit-scrollbar { height: 8px; width: 8px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }

@@ -199,9 +199,10 @@ const normalizeStr = (str) => {
     return str.toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9%]/g, '');
 };
 
-// Implantação correspondente ao Code.gs V20 (2026-08-08-orcamentario-por-documento-ccor).
+// Implantação V21, compatível com o Code.gs orçamentário por documento CCor.
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwDf4gT-FPusNrbuXS0t-dE-LCLmqXmMVG7QX34GuQUHWc3EwjEargr1Mdi4DeXwpxf/exec";
-const DASH_CACHE_KEY = 'dashData_PainelGeral_api_v19_recebido_contabil_v3';
+const DASH_CACHE_KEY = 'dashData_PainelGeral_api_v21_orc_detail_v5';
+const DASH_VERSION = 'V21';
 
 const AUTH_STORAGE_KEYS = [
     'token_PainelGeral',
@@ -278,6 +279,28 @@ const parsePercentAsFloat = (val) => {
 
 const formatBRL = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0);
 const formatPercentBR = (v) => new Intl.NumberFormat('pt-BR', { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0);
+
+const formatDurationDays = (value) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
+    const numericValue = Math.trunc(Number(value));
+    const sign = numericValue < 0 ? '- ' : '';
+    let remaining = Math.abs(numericValue);
+    const years = Math.floor(remaining / 365);
+    remaining %= 365;
+    const months = Math.floor(remaining / 30);
+    const days = remaining % 30;
+    const parts = [];
+    if (years) parts.push(`${years} ${years === 1 ? 'ano' : 'anos'}`);
+    if (months) parts.push(`${months} ${months === 1 ? 'mês' : 'meses'}`);
+    if (days || parts.length === 0) parts.push(`${days} ${days === 1 ? 'dia' : 'dias'}`);
+    return sign + parts.join(' ');
+};
+
+const splitBudgetDimensionValue = (value) => {
+    const normalized = String(value || '').trim().toUpperCase();
+    if (!normalized || normalized === '-') return [];
+    return [...new Set(normalized.split(/\s*;\s*/).map(item => item.trim()).filter(Boolean))];
+};
 
 const getFornecedorCnpj = (fornecedor) => {
     const identifier = String(fornecedor || '').split(/\s+-\s+/)[0];
@@ -498,7 +521,7 @@ const getBubbleTooltip = () => ({
                 `Recebido: ${formatBRL(d.v_recebido)} (${percentOfCommitted(d.v_recebido)})`,
                 `Liquidado: ${formatBRL(d.v_liquidado)} (${percentOfCommitted(d.v_liquidado)})`,
                 `Pago: ${formatBRL(d.v_pago)} (${percentOfCommitted(d.v_pago)})`,
-                `% Tempo: ${formatPercentBR(d.perc_tempo)}`
+                `Tempo: ${Math.max(0, d.dias_passaram || 0).toLocaleString('pt-BR')} dias de ${Math.max(0, d.duracao_total_dias || 0).toLocaleString('pt-BR')} (${formatPercentBR(d.perc_tempo)})`
             ];
         }
     }
@@ -556,9 +579,9 @@ const ChartComponent = ({ type, data, options, id }) => {
     return <canvas ref={canvasRef}></canvas>;
 };
 
-// Componente: Alterna entre Gráfico de Pizza e Barra Vertical Única com Seletor Financeiro
+// Componente: alterna entre Pizza, Barras e Tabela com seletor financeiro.
 function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
-    const [viewPie, setViewPie] = useState(true);
+    const [viewMode, setViewMode] = useState('pie');
     const [finMetric, setFinMetric] = useState('total');
 
     const activeMetric = isFinancial ? finMetric : 'count';
@@ -598,6 +621,8 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
     }, [data, isFornecedor, activeMetric]);
 
     const chartLabels = cleanData.map(d => formatLabelMultiLine(d.label, 15));
+    const displayedValues = cleanData.map(d => d[activeMetric] || 0);
+    const displayedTotal = displayedValues.reduce((sum, value) => sum + value, 0);
     
     const metricNames = {
         'total': 'Empenhado', 'recebido': 'Recebido', 'a_receber': 'A Receber',
@@ -627,19 +652,19 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
         plugins: {
             tooltip: {
                 callbacks: {
+                    title: function(context) {
+                        return context[0]?.label || '';
+                    },
                     label: function(context) {
-                        let label = context.label || '';
-                        if (label) label += ': ';
-                        let value = context.raw;
-                        const dataArr = context.chart.data.datasets[0].data;
-                        const total = dataArr.reduce((a, b) => a + b, 0);
-                        const percentage = total ? (value * 100 / total).toFixed(2).replace('.', ',') + '%' : '0%';
-                        if (isFinancial) {
-                            label += formatBRL(value) + ' (' + percentage + ')';
-                        } else {
-                            label += value.toLocaleString('pt-BR') + ' (' + percentage + ')';
-                        }
-                        return label;
+                        const item = cleanData[context.dataIndex];
+                        const value = isFinancial ? item[activeMetric] || 0 : item.total || 0;
+                        const shareBase = isFinancial ? displayedTotal : cleanData.reduce((sum, row) => sum + (row.count || 0), 0);
+                        const shareValue = isFinancial ? item[activeMetric] || 0 : item.count || 0;
+                        return [
+                            `Valor: ${formatBRL(value)}`,
+                            `Quantidade: ${(item.count || 0).toLocaleString('pt-BR')}`,
+                            `Porcentagem: ${shareBase ? formatPercentBR(shareValue / shareBase) : '0,00%'}`
+                        ];
                     }
                 }
             },
@@ -713,7 +738,24 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
         maintainAspectRatio: false,
         layout: { padding: { top: 30 } },
         plugins: {
-            tooltip: tooltipCallback,
+            tooltip: {
+                callbacks: {
+                    title: function(context) {
+                        return cleanData[context[0]?.dataIndex]?.label || '';
+                    },
+                    label: function(context) {
+                        const item = cleanData[context.dataIndex];
+                        const value = isFinancial ? item[activeMetric] || 0 : item.total || 0;
+                        const shareBase = isFinancial ? displayedTotal : cleanData.reduce((sum, row) => sum + (row.count || 0), 0);
+                        const shareValue = isFinancial ? item[activeMetric] || 0 : item.count || 0;
+                        return [
+                            `Valor: ${formatBRL(value)}`,
+                            `Quantidade: ${(item.count || 0).toLocaleString('pt-BR')}`,
+                            `Porcentagem: ${shareBase ? formatPercentBR(shareValue / shareBase) : '0,00%'}`
+                        ];
+                    }
+                }
+            },
             legend: { display: false }, 
             datalabels: {
                 display: function(context) { return context.dataset.data[context.dataIndex] > 0; },
@@ -751,6 +793,10 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
         }
     };
 
+    const nextViewMode = viewMode === 'pie' ? 'bar' : viewMode === 'bar' ? 'table' : 'pie';
+    const nextViewLabel = viewMode === 'pie' ? '► BARRAS' : viewMode === 'bar' ? '▦ TABELA' : '◉ PIZZA';
+    const currentViewLabel = viewMode === 'pie' ? 'Fatias' : viewMode === 'bar' ? 'Barras' : 'Linhas';
+
     return (
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full hover:shadow-md transition">
             <div className="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
@@ -771,21 +817,51 @@ function ToggleableChartCard({ title, data, isFinancial, id, isFornecedor }) {
                         </select>
                     )}
                     <span className="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded hidden sm:inline-block">
-                        {viewPie ? 'Fatias' : 'Barras'}: {cleanData.length}
+                        {currentViewLabel}: {cleanData.length}
                     </span>
-                    <button onClick={() => setViewPie(!viewPie)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer">
-                        {viewPie ? '► BARRAS' : '► PIZZA'}
+                    <button onClick={() => setViewMode(nextViewMode)} className="text-[9px] font-black uppercase tracking-widest bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 transition shadow-sm cursor-pointer">
+                        {nextViewLabel}
                     </button>
                 </div>
             </div>
             <div className="w-full flex-1 flex flex-col min-h-[300px] relative">
+                {viewMode === 'table' ? (
+                    <div className="absolute inset-0 overflow-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-[10px]">
+                            <thead className="sticky top-0 bg-slate-100 text-slate-700 uppercase">
+                                <tr>
+                                    <th className="p-2 text-left">Assunto</th>
+                                    <th className="p-2 text-right">Quantidade</th>
+                                    <th className="p-2 text-right">Valor</th>
+                                    <th className="p-2 text-right">%</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {cleanData.map((item, index) => {
+                                    const shareValue = isFinancial ? item[activeMetric] || 0 : item.count || 0;
+                                    const shareBase = isFinancial ? displayedTotal : cleanData.reduce((sum, row) => sum + (row.count || 0), 0);
+                                    const value = isFinancial ? item[activeMetric] || 0 : item.total || 0;
+                                    return (
+                                        <tr key={`${id}-table-${index}`} className="hover:bg-blue-50">
+                                            <td className="p-2 font-bold text-slate-700 break-words" title={item.label}>{item.label}</td>
+                                            <td className="p-2 text-right tabular-nums">{(item.count || 0).toLocaleString('pt-BR')}</td>
+                                            <td className="p-2 text-right tabular-nums font-bold">{formatBRL(value)}</td>
+                                            <td className="p-2 text-right tabular-nums">{shareBase ? formatPercentBR(shareValue / shareBase) : '0,00%'}</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
                 <div className="absolute inset-0">
-                    {viewPie ? (
+                    {viewMode === 'pie' ? (
                         <ChartComponent id={`pie-${id}`} type="pie" data={pieData} options={pieOptions} />
                     ) : (
                         <ChartComponent id={`bar-${id}`} type="bar" data={barData} options={barOptions} />
                     )}
                 </div>
+                )}
             </div>
         </div>
     );
@@ -821,7 +897,7 @@ function KPICard({ title, value, subValue, diffValue, diffLabel, extraText, colo
             <div className="flex flex-col w-full min-w-0">
                 <AutoFitText text={mainText} className="font-black text-2xl tracking-tight" />
                 {diffValue !== undefined && (
-                    <span className="text-[10px] font-bold text-red-500 mt-1 truncate" title={`${diffLabel}: ${formatBRL(diffValue)}`}>
+                    <span className="text-[10px] font-bold text-red-500 mt-1 leading-tight break-words" title={`${diffLabel}: ${formatBRL(diffValue)}`}>
                         {diffLabel}: {formatBRL(diffValue)}
                     </span>
                 )}
@@ -942,6 +1018,65 @@ function DateInput({ label, value, onChange }) {
     );
 }
 
+function AccessMetadata() {
+    const [currentDateTime, setCurrentDateTime] = useState(() => new Date());
+    const [accessLocation, setAccessLocation] = useState('LOCALIZAÇÃO EM CONSULTA');
+
+    useEffect(() => {
+        const timer = window.setInterval(() => setCurrentDateTime(new Date()), 1000);
+        let cancelled = false;
+
+        const fetchLocation = async () => {
+            const providers = [
+                async () => {
+                    const response = await fetch('https://ipapi.co/json/');
+                    if (!response.ok) throw new Error('ipapi indisponível');
+                    const location = await response.json();
+                    return [location.city, location.country_name].filter(Boolean).join(', ');
+                },
+                async () => {
+                    const response = await fetch('https://ipwho.is/');
+                    if (!response.ok) throw new Error('ipwho indisponível');
+                    const location = await response.json();
+                    return [location.city, location.country].filter(Boolean).join(', ');
+                }
+            ];
+
+            for (const provider of providers) {
+                try {
+                    const location = await provider();
+                    if (location) {
+                        if (!cancelled) setAccessLocation(location);
+                        return;
+                    }
+                } catch (error) {}
+            }
+            if (!cancelled) setAccessLocation('LOCALIZAÇÃO INDISPONÍVEL');
+        };
+
+        fetchLocation();
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+    }, []);
+
+    const datePart = new Intl.DateTimeFormat('pt-BR', {
+        day: '2-digit', month: 'long', year: 'numeric'
+    }).format(currentDateTime);
+    const timePart = new Intl.DateTimeFormat('pt-BR', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).format(currentDateTime);
+
+    return (
+        <div className="min-w-[245px] text-[11px] font-bold leading-5 text-slate-600 whitespace-nowrap">
+            <p title="Localização aproximada obtida pelo IP de acesso">{accessLocation} – {datePart}; {timePart}</p>
+            <p>Versão {DASH_VERSION}</p>
+            <p className="italic">Produzido por Cel Brito</p>
+        </div>
+    );
+}
+
 function CollapsibleSection({ title, children, defaultOpen = false, globalTrigger, globalState }) {
     const [isOpen, setIsOpen] = useState(defaultOpen);
     useEffect(() => { if (globalTrigger > 0) setIsOpen(globalState); }, [globalTrigger, globalState]);
@@ -1019,13 +1154,17 @@ function Dashboard() {
     const [searchFornecedor, setSearchFornecedor] = useState("");
     const [searchObjeto, setSearchObjeto] = useState("");
     const [searchGestorFiscal, setSearchGestorFiscal] = useState("");
+    const [searchAo, setSearchAo] = useState("");
+    const [searchPo, setSearchPo] = useState("");
+    const [searchNd, setSearchNd] = useState("");
 
     const [showMasterColsMenu, setShowMasterColsMenu] = useState(false);
+    const [expandedBudgetContracts, setExpandedBudgetContracts] = useState([]);
     const financeTableRef = useRef(null);
     const masterColumnLabels = {
         contrato: "CONTRATO", situacao: "SITUAÇÃO", secLog: "SEC LOG", fornecedor: "FORNECEDOR", objeto: "OBJETO", gestorFiscal: "GESTORES/FISCAIS",
-        ao: "AO", po: "PO", nd: "ND",
         dataInic: "INÍCIO", dataFim: "FIM", percTempo: "% TEMPO", diasPassaram: "PASSARAM", encerrandoDias: "FALTAM",
+        ao: "AO", po: "PO", nd: "ND",
         difGlobal: "GLOBAL-EMP", vGlobal: "GLOBAL", empenhado: "EMPENHADO", recebido: "RECEBIDO", pRecebido: "RCB %", liquidado: "LIQUIDADO", pLiquidado: "LIQ %",
         aLiquidar: "A LIQUIDAR", pALiquidar: "A LIQ %", pago: "PAGO", pPago: "PAGO %", aPagar: "A PAGAR", pAPagar: "A PAGAR %",
         bloqueado: "BLOQUEADO", pBloqueado: "BLOQ %", cancelado: "CANCELADO", pCancelado: "CANC %", executado: "EXECUTADO", pExecutado: "EXEC %",
@@ -1057,6 +1196,12 @@ function Dashboard() {
     const initialDateFilters = { data_inic: {min:'', max:''}, data_fim: {min:'', max:''} };
     const [dateFilters, setDateFilters] = useState(initialDateFilters);
 
+    const toggleBudgetContract = (contract) => {
+        setExpandedBudgetContracts(previous => previous.includes(contract)
+            ? previous.filter(item => item !== contract)
+            : [...previous, contract]);
+    };
+
     // TAGs System para Ações Rápidas
     const [fSituacaoTags, setFSituacaoTags] = useState([]);
     const toggleSituacaoTag = (lbl) => {
@@ -1076,6 +1221,7 @@ function Dashboard() {
         setFAo([]); setFPo([]); setFPtres([]); setFPi([]); setFNd([]);
         setDInicDe(""); setDInicAte(""); setDFimDe(""); setDFimAte("");
         setSearchContrato(""); setSearchSituacao(""); setSearchSecLog(""); setSearchFornecedor(""); setSearchObjeto(""); setSearchGestorFiscal("");
+        setSearchAo(""); setSearchPo(""); setSearchNd("");
         setFSituacaoTags([]);
         setNumFilters(initialNumFilters); setDateFilters(initialDateFilters);
     };
@@ -1119,6 +1265,9 @@ function Dashboard() {
     const cSupItems = ["SGLS-CLASSE I", "SGLFE-CLASSE II", "SGLC-CLASSE III", "SGLME-CLASSE V (MUN)"];
     const isCSupActive = fSecLog.length === 4 && cSupItems.every(i => fSecLog.includes(i));
     const toggleCSup = () => { if (isCSupActive) setFSecLog([]); else setFSecLog(cSupItems); };
+    const nonCSupItems = [...new Set(rawData.map(item => item.sec_log).filter(value => value && value !== '-' && !cSupItems.includes(value)))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const isNonCSupActive = nonCSupItems.length > 0 && fSecLog.length === nonCSupItems.length && nonCSupItems.every(item => fSecLog.includes(item));
+    const toggleNonCSup = () => { if (isNonCSupActive) setFSecLog([]); else setFSecLog(nonCSupItems); };
 
     const logout = () => {
         clearAuthStorage();
@@ -1129,7 +1278,13 @@ function Dashboard() {
         window.location.reload();
     };
 
-    const buildOrcamentarioByContrato = (orcamentarioRows) => {
+    const normalizeDocumentKey = (value) => String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+
+    const buildOrcamentarioByContrato = (orcamentarioRows, recebidoByDocumento = {}) => {
         const result = {};
         if (!orcamentarioRows || orcamentarioRows.length < 2) return result;
 
@@ -1165,7 +1320,8 @@ function Dashboard() {
             po_filter_values: new Set(),
             ptres_values: new Set(), pi_cod_values: new Set(),
             pi_nome_values: new Set(), pi_filter_values: new Set(),
-            nd_codigo_values: new Set(), nd_nome_values: new Set(), nd_filter_values: new Set()
+            nd_codigo_values: new Set(), nd_nome_values: new Set(), nd_filter_values: new Set(),
+            orc_detail_rows: new Map()
         });
 
         const addValue = (accumulator, key, value) => {
@@ -1180,6 +1336,11 @@ function Dashboard() {
             accumulator[key].add(normalizedName && normalizedName !== '-'
                 ? `${normalizedName} – ${normalizedCode && normalizedCode !== '-' ? normalizedCode : 'N/I'}`
                 : normalizedCode);
+        };
+
+        const normalizeDimension = (value) => {
+            const normalized = String(value || '').trim().toUpperCase();
+            return normalized && normalized !== '-' ? normalized : 'N/I';
         };
 
         orcamentarioRows.slice(1).forEach(row => {
@@ -1201,6 +1362,10 @@ function Dashboard() {
             const piNome = getValue(row, ['PI Nome'], ['pi nome']);
             const ndCodigo = getValue(row, ['ND_DOC', 'ND Código', 'ND Codigo'], ['nd doc']);
             const ndNome = getValue(row, ['ND_NOME', 'ND Nome'], ['nd nome']);
+            const ndCodigoValues = splitBudgetDimensionValue(ndCodigo);
+            const ndNomeValues = splitBudgetDimensionValue(ndNome);
+            const ptres = getValue(row, ['PTRES Código', 'PTRES Codigo', 'PTRES'], ['ptres codigo', 'ptres']);
+            const documento = getValue(row, ['Documento CCor Número', 'Documento CCor Numero', 'DOCUMENTO_CCOR_NUMERO'], ['documento ccor']);
 
             addValue(target, 'ao_codigo_values', aoCodigo);
             addValue(target, 'ao_nome_values', aoNome);
@@ -1208,18 +1373,67 @@ function Dashboard() {
             addValue(target, 'po_codigo_values', poCodigo);
             addValue(target, 'po_nome_values', poNome);
             addNameCodePair(target, 'po_filter_values', poNome, poCodigo);
-            addValue(target, 'ptres_values', getValue(row, ['PTRES Código', 'PTRES Codigo', 'PTRES'], ['ptres codigo', 'ptres']));
+            addValue(target, 'ptres_values', ptres);
             addValue(target, 'pi_cod_values', piCodigo);
             addValue(target, 'pi_nome_values', piNome);
             addNameCodePair(target, 'pi_filter_values', piNome, piCodigo);
-            addValue(target, 'nd_codigo_values', ndCodigo);
-            addValue(target, 'nd_nome_values', ndNome);
-            addNameCodePair(target, 'nd_filter_values', ndNome, ndCodigo);
+            ndCodigoValues.forEach(code => addValue(target, 'nd_codigo_values', code));
+            ndNomeValues.forEach(name => addValue(target, 'nd_nome_values', name));
+            ndCodigoValues.forEach((code, index) => addNameCodePair(
+                target,
+                'nd_filter_values',
+                ndNomeValues[index] || (ndNomeValues.length === 1 ? ndNomeValues[0] : ''),
+                code
+            ));
+
+            const documentKey = normalizeDocumentKey(documento);
+            const detail = {
+                contrato,
+                documento: normalizeDimension(documento),
+                ao_codigo: normalizeDimension(aoCodigo), ao_nome: normalizeDimension(aoNome),
+                po_codigo: normalizeDimension(poCodigo), po_nome: normalizeDimension(poNome),
+                pi_codigo: normalizeDimension(piCodigo), pi_nome: normalizeDimension(piNome),
+                nd_codigo: normalizeDimension(ndCodigoValues.join('; ')), nd_nome: normalizeDimension(ndNomeValues.join('; ')),
+                ptres: normalizeDimension(ptres),
+                v_empenhado: parseValue(getValue(row, ['TOTAL EMPENHADO'], ['total empenhado'])),
+                v_liquidado: parseValue(getValue(row, ['TOTAL LIQUIDADO'], ['total liquidado'])),
+                v_pago: parseValue(getValue(row, ['TOTAL PAGO'], ['total pago'])),
+                v_cancelado: parseValue(getValue(row, ['TOTAL CANCELADO'], ['total cancelado'])),
+                v_bloqueado: parseValue(getValue(row, ['TOTAL BLOQUEADO'], ['total bloqueado'])),
+                v_recebido: recebidoByDocumento[documentKey] || 0
+            };
+            detail.ao_filter = detail.ao_nome !== 'N/I' ? `${detail.ao_nome} – ${detail.ao_codigo}` : detail.ao_codigo;
+            detail.po_filter = detail.po_nome !== 'N/I' ? `${detail.po_nome} – ${detail.po_codigo}` : detail.po_codigo;
+            detail.pi_filter = detail.pi_nome !== 'N/I' ? `${detail.pi_nome} – ${detail.pi_codigo}` : detail.pi_codigo;
+            detail.nd_filter_values = ndCodigoValues.map((code, index) => {
+                const name = ndNomeValues[index] || (ndNomeValues.length === 1 ? ndNomeValues[0] : '');
+                return name ? `${name} – ${code}` : code;
+            });
+            detail.nd_filter = detail.nd_filter_values.join('; ') || detail.nd_codigo;
+            detail.v_a_liquidar = detail.v_empenhado - detail.v_liquidado - detail.v_cancelado - detail.v_bloqueado;
+            detail.v_a_pagar = detail.v_empenhado - detail.v_pago - detail.v_cancelado - detail.v_bloqueado;
+            detail.v_executado = detail.v_liquidado + detail.v_cancelado + detail.v_bloqueado;
+
+            const detailKey = [documentKey, detail.ao_codigo, detail.po_codigo, detail.pi_codigo, detail.nd_codigo].join('|');
+            const previous = target.orc_detail_rows.get(detailKey);
+            if (!previous) target.orc_detail_rows.set(detailKey, detail);
+            else {
+                ['v_empenhado', 'v_liquidado', 'v_pago', 'v_cancelado', 'v_bloqueado', 'v_recebido', 'v_a_liquidar', 'v_a_pagar', 'v_executado']
+                    .forEach(metric => { previous[metric] += detail[metric] || 0; });
+            }
         });
 
         Object.values(result).forEach(accumulator => {
             Object.keys(accumulator).forEach(key => {
-                accumulator[key] = [...accumulator[key]].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+                if (accumulator[key] instanceof Set) {
+                    accumulator[key] = [...accumulator[key]].sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+                } else if (accumulator[key] instanceof Map) {
+                    accumulator[key] = [...accumulator[key].values()].sort((a, b) =>
+                        [a.ao_codigo, a.po_codigo, a.nd_codigo, a.pi_codigo].join('|').localeCompare(
+                            [b.ao_codigo, b.po_codigo, b.nd_codigo, b.pi_codigo].join('|'), 'pt-BR', { numeric: true }
+                        )
+                    );
+                }
             });
         });
 
@@ -1230,7 +1444,7 @@ function Dashboard() {
         ao_codigo_values: [], ao_nome_values: [], ao_filter_values: [],
         po_codigo_values: [], po_nome_values: [], po_filter_values: [],
         ptres_values: [], pi_cod_values: [], pi_nome_values: [], pi_filter_values: [],
-        nd_codigo_values: [], nd_nome_values: [], nd_filter_values: []
+        nd_codigo_values: [], nd_nome_values: [], nd_filter_values: [], orc_detail_rows: []
     });
 
     const normalizeContractKey = (value) => String(value || '')
@@ -1298,12 +1512,53 @@ function Dashboard() {
         return recebidoByContrato;
     };
 
+    const buildRecebidoByDocumento = (contabilRows) => {
+        const recebidoByDocumento = {};
+        if (!contabilRows || contabilRows.length < 2) return recebidoByDocumento;
+
+        const headers = contabilRows[0] || [];
+        const headerMap = {};
+        headers.forEach((header, index) => {
+            const normalized = normalizeStr(header);
+            if (normalized) headerMap[normalized] = index;
+        });
+        const getValue = (row, exactNames, fallbackKeywords = []) => {
+            for (const name of exactNames) {
+                const index = headerMap[normalizeStr(name)];
+                if (index !== undefined && row[index] !== undefined && row[index] !== null) return row[index].toString().trim();
+            }
+            for (const keyword of fallbackKeywords) {
+                const normalizedKeyword = normalizeStr(keyword);
+                const headerKey = Object.keys(headerMap).find(key => key.includes(normalizedKeyword));
+                if (headerKey) return String(row[headerMap[headerKey]] || '').trim();
+            }
+            return '';
+        };
+
+        contabilRows.slice(1).forEach(row => {
+            if (!row || !row.length) return;
+            const information = getValue(row, ['ITEM_INFORMACAO', 'INTEN_INFORMACAO', 'Informação', 'Informacao'], ['item informacao', 'informacao']);
+            if (!normalizeStr(information).includes('recebido')) return;
+            const documentKey = normalizeDocumentKey(getValue(
+                row,
+                ['Documento CCor Número', 'Documento CCor Numero', 'DOCUMENTO_CCOR_NUMERO'],
+                ['documento ccor']
+            ));
+            if (!documentKey) return;
+            const rawValue = getValue(row, ['Valor Item (R$)', 'Valor (R$)', 'VALOR', 'Valor'], ['valor item', 'valor']);
+            recebidoByDocumento[documentKey] = (recebidoByDocumento[documentKey] || 0) + parseValue(rawValue);
+        });
+
+        return recebidoByDocumento;
+    };
+
     const processData = (rowsArray, contabilRows = [], orcamentarioRows = [], fromCache = false) => {
         if (!rowsArray || rowsArray.length < 2) { setStatus("Planilha vazia ou aba não encontrada."); setLoading(false); return; }
         setStatus("A estruturar matriz de dados...");
         const headers = rowsArray[0];
         const recebidoByContrato = buildRecebidoByContrato(contabilRows);
-        const orcamentarioByContrato = buildOrcamentarioByContrato(orcamentarioRows);
+        const recebidoByDocumento = buildRecebidoByDocumento(contabilRows);
+        const orcamentarioByContrato = buildOrcamentarioByContrato(orcamentarioRows, recebidoByDocumento);
         const hoje = new Date(); hoje.setHours(0,0,0,0);
 
         const mappedRaw = rowsArray.slice(1).map(row => {
@@ -1325,12 +1580,12 @@ function Dashboard() {
             const dtInicParsed = parseDateBR(getVal(["Vig. Início", "Vigencia Inicio"]));
             const dtFimParsed = parseDateBR(getVal(["Vig. Fim", "Vigencia Fim"]));
 
-            let diasRestantes = null, diasPassaram = null, percTempo = null;
+            let diasRestantes = null, diasPassaram = null, percTempo = null, duracaoTotalDias = null;
             if (dtFimParsed) diasRestantes = Math.ceil((dtFimParsed - hoje) / 86400000);
             if (dtInicParsed) diasPassaram = Math.ceil((hoje - dtInicParsed) / 86400000);
             if (dtInicParsed && dtFimParsed) {
-                const totalDias = Math.ceil((dtFimParsed - dtInicParsed) / 86400000);
-                percTempo = totalDias > 0 ? diasPassaram / totalDias : 0;
+                duracaoTotalDias = Math.ceil((dtFimParsed - dtInicParsed) / 86400000);
+                percTempo = duracaoTotalDias > 0 ? diasPassaram / duracaoTotalDias : 0;
             }
 
             const v_empenhado = parseValue(getVal(["TOTAL EMPENHADO"]));
@@ -1367,7 +1622,7 @@ function Dashboard() {
                 data_inic: getVal(["Vig. Início", "Vigencia Inicio"]), data_fim: getVal(["Vig. Fim", "Vigencia Fim"]),
                 dtInicVal: dtInicParsed ? dtInicParsed.getTime() : 0, dtFimVal: dtFimParsed ? dtFimParsed.getTime() : 0,
                 ano_vig_ini: dtInicParsed ? dtInicParsed.getFullYear().toString() : "N/I",
-                dias_passaram: diasPassaram, perc_tempo: percTempo, encerrando_dias: diasRestantes,
+                dias_passaram: diasPassaram, perc_tempo: percTempo, encerrando_dias: diasRestantes, duracao_total_dias: duracaoTotalDias,
                 
                 v_global: parseValue(getVal(["Valor Global"])), 
                 v_empenhado, v_recebido, p_recebido, v_liquidado, v_pago, v_bloqueado, v_cancelado,
@@ -1486,7 +1741,7 @@ function Dashboard() {
             setStatus(`Online - Dados carregados via Apps Script${extra}`);
         } catch (error) { 
             console.error(error);
-            setStatus(error.message || "Falha de Acesso à API. Utilize Carga Manual."); setLoading(false); 
+            setStatus(error.message || "Falha de acesso à API. Tente sincronizar novamente."); setLoading(false); 
         }
     };
 
@@ -1553,6 +1808,9 @@ function Dashboard() {
             const sForn = !searchFornecedor || item.fornecedor.includes(searchFornecedor.toUpperCase());
             const sObj = !searchObjeto || item.objeto.includes(searchObjeto.toUpperCase());
             const sGest = !searchGestorFiscal || item.gestor.includes(searchGestorFiscal.toUpperCase()) || item.fiscal.includes(searchGestorFiscal.toUpperCase());
+            const sAo = !searchAo || String(item.ao_codigos || '').includes(searchAo.toUpperCase()) || (item.ao_filter_values || []).some(value => value.includes(searchAo.toUpperCase()));
+            const sPo = !searchPo || String(item.po_codigos || '').includes(searchPo.toUpperCase()) || (item.po_filter_values || []).some(value => value.includes(searchPo.toUpperCase()));
+            const sNd = !searchNd || String(item.nd_codigos || '').includes(searchNd.toUpperCase()) || (item.nd_filter_values || []).some(value => value.includes(searchNd.toUpperCase()));
 
             const mSitTag = fSituacaoTags.length === 0 || item.situacaoFlags.some(f => fSituacaoTags.includes(f.label));
 
@@ -1563,7 +1821,7 @@ function Dashboard() {
             }
             return mFisc && mGest && mFiscSub && mGestSub && mSec && mCont && mForn && mCompra && mMod &&
                 mAo && mPo && mPtres && mPi && mNd &&
-                mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sSecLog && sForn && sObj && sGest && mSitTag && mNum;
+                mDDe && mDAte && mFDe && mFAte && mDateTbl && sCont && sSit && sSecLog && sForn && sObj && sGest && sAo && sPo && sNd && mSitTag && mNum;
         });
 
         if (sortConfig.key) {
@@ -1582,7 +1840,69 @@ function Dashboard() {
         return filtered;
     }, [rawData, fFiscal, fGestor, fFiscalSub, fGestorSub, fSecLog, fContrato, fFornecedor, fCompra, fModalidade,
         fAo, fPo, fPtres, fPi, fNd,
-        dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchSecLog, searchFornecedor, searchObjeto, searchGestorFiscal, numFilters, sortConfig, fSituacaoTags]);
+        dInicDe, dInicAte, dFimDe, dFimAte, dateFilters, searchContrato, searchSituacao, searchSecLog, searchFornecedor, searchObjeto, searchGestorFiscal,
+        searchAo, searchPo, searchNd, numFilters, sortConfig, fSituacaoTags]);
+
+    const filteredOrcamentarioDetails = useMemo(() => {
+        const details = [];
+        const processedContracts = new Set();
+        filteredData.forEach(item => {
+            if (processedContracts.has(item.contrato)) return;
+            processedContracts.add(item.contrato);
+            (item.orc_detail_rows || []).forEach(detail => {
+                const matches = (selected, value) => selected.length === 0 || selected.includes(value);
+                if (!matches(fAo, detail.ao_filter)) return;
+                if (!matches(fPo, detail.po_filter)) return;
+                if (!matches(fPtres, detail.ptres)) return;
+                if (!matches(fPi, detail.pi_filter)) return;
+                if (fNd.length && !fNd.some(value => (detail.nd_filter_values || [detail.nd_filter]).includes(value))) return;
+                details.push({ ...detail, contrato: item.contrato });
+            });
+        });
+        return details;
+    }, [filteredData, fAo, fPo, fPtres, fPi, fNd]);
+
+    const budgetBreakdownByContract = useMemo(() => {
+        const byContract = {};
+        filteredOrcamentarioDetails.forEach(detail => {
+            if (!byContract[detail.contrato]) byContract[detail.contrato] = {};
+            const ndCodes = splitBudgetDimensionValue(detail.nd_codigo);
+            const ndNames = splitBudgetDimensionValue(detail.nd_nome);
+            const normalizedCodes = ndCodes.length ? ndCodes : ['N/I'];
+            const allocation = 1 / normalizedCodes.length;
+            normalizedCodes.forEach((ndCode, index) => {
+                const ndName = ndNames[index] || (ndNames.length === 1 ? ndNames[0] : 'N/I');
+                const key = [detail.ao_codigo, detail.po_codigo, ndCode].join('|');
+                if (!byContract[detail.contrato][key]) {
+                    byContract[detail.contrato][key] = {
+                        ao_codigo: detail.ao_codigo, ao_nome: detail.ao_nome,
+                        po_codigo: detail.po_codigo, po_nome: detail.po_nome,
+                        nd_codigo: ndCode, nd_nome: ndName,
+                        v_empenhado: 0, v_recebido: 0, v_liquidado: 0, v_a_liquidar: 0,
+                        v_pago: 0, v_a_pagar: 0, v_bloqueado: 0, v_cancelado: 0, v_executado: 0
+                    };
+                }
+                const target = byContract[detail.contrato][key];
+                ['v_empenhado', 'v_recebido', 'v_liquidado', 'v_a_liquidar', 'v_pago', 'v_a_pagar', 'v_bloqueado', 'v_cancelado', 'v_executado']
+                    .forEach(metric => { target[metric] += (detail[metric] || 0) * allocation; });
+            });
+        });
+        Object.keys(byContract).forEach(contract => {
+            byContract[contract] = Object.values(byContract[contract]).map(item => ({
+                ...item,
+                p_recebido: item.v_empenhado ? item.v_recebido / item.v_empenhado : 0,
+                p_liquidado: item.v_empenhado ? item.v_liquidado / item.v_empenhado : 0,
+                p_a_liquidar: item.v_empenhado ? item.v_a_liquidar / item.v_empenhado : 0,
+                p_pago: item.v_empenhado ? item.v_pago / item.v_empenhado : 0,
+                p_a_pagar: item.v_empenhado ? item.v_a_pagar / item.v_empenhado : 0,
+                p_bloqueado: item.v_empenhado ? item.v_bloqueado / item.v_empenhado : 0,
+                p_cancelado: item.v_empenhado ? item.v_cancelado / item.v_empenhado : 0,
+                p_executado: item.v_empenhado ? item.v_executado / item.v_empenhado : 0,
+                p_exec_liq: item.v_empenhado ? item.v_pago / item.v_empenhado : 0
+            }));
+        });
+        return byContract;
+    }, [filteredOrcamentarioDetails]);
 
     // Autofit real das colunas de INÍCIO até a última métrica visível.
     useEffect(() => {
@@ -1613,7 +1933,7 @@ function Dashboard() {
         });
 
         return () => cancelAnimationFrame(frameId);
-    }, [filteredData, masterVisibleCols]);
+    }, [filteredData, masterVisibleCols, expandedBudgetContracts]);
 
     const totalsMaster = useMemo(() => {
         let global = 0, dif = 0, emp = 0, rec = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0, a_liq = 0, a_pag = 0;
@@ -1626,14 +1946,14 @@ function Dashboard() {
     }, [filteredData]);
 
     const kpis = useMemo(() => {
-        let global = 0, emp = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0;
+        let global = 0, emp = 0, rec = 0, liq = 0, pag = 0, blo = 0, can = 0, exe = 0;
         const processedContracts = new Set();
         let qtdAtivos = 0, qtdAtivosInexec = 0, qtdAtivosEmExec = 0, qtdAtivosExecTot = 0, qtdAtivosExecParc = 0;
         let qtdVencidos = 0, qtdVencInexecTot = 0, qtdVencidosTot = 0, qtdVencidosParc = 0;
         let qtdBloqueados = 0, qtdCancelados = 0;
 
         filteredData.forEach(r => { 
-            global += r.v_global; emp += r.v_empenhado; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; 
+            global += r.v_global; emp += r.v_empenhado; rec += r.v_recebido || 0; liq += r.v_liquidado; pag += r.v_pago; blo += r.v_bloqueado; can += r.v_cancelado; exe += r.v_executado; 
             if (!processedContracts.has(r.contrato)) {
                 processedContracts.add(r.contrato);
                 if (r.situacaoFlags.some(f => f.label === 'CAN')) qtdCancelados++;
@@ -1671,11 +1991,12 @@ function Dashboard() {
             qtdFiscaisTit: fiscaisTitulares.size,
             qtdFiscaisSub: fiscaisSubstitutos.size,
             qtdFornecedores: new Set(filteredData.map(d => d.fornecedor).filter(validName)).size,
+            qtdSecLog: new Set(filteredData.map(d => d.sec_log).filter(validName)).size,
             qtdAtivos, qtdAtivosInexec, qtdAtivosEmExec, qtdAtivosExecTot, qtdAtivosExecParc,
             qtdVencidos, qtdVencInexecTot, qtdVencidosTot, qtdVencidosParc, qtdBloqueados, qtdCancelados,
-            global, emp, liq, pag, blo, can, exe,
+            global, emp, rec, liq, pag, blo, can, exe,
             pEmpGlobal: global ? emp / global : 0,
-            pLiq: emp ? liq / emp : 0, pPag: emp ? pag / emp : 0, pBlo: emp ? blo / emp : 0, pCan: emp ? can / emp : 0, pExe: emp ? exe / emp : 0
+            pRec: emp ? rec / emp : 0, pLiq: emp ? liq / emp : 0, pPag: emp ? pag / emp : 0, pBlo: emp ? blo / emp : 0, pCan: emp ? can / emp : 0, pExe: emp ? exe / emp : 0
         };
     }, [filteredData]);
 
@@ -1736,13 +2057,43 @@ function Dashboard() {
         return Object.values(map);
     };
 
+    const getOrcamentarioPieData = (dimensionKey) => {
+        const map = {};
+        filteredOrcamentarioDetails.forEach(detail => {
+            const rawLabel = detail[dimensionKey] && detail[dimensionKey] !== '-' ? detail[dimensionKey] : 'N/I';
+            const labels = dimensionKey === 'nd_codigo' ? splitBudgetDimensionValue(rawLabel) : [rawLabel];
+            const normalizedLabels = labels.length ? labels : ['N/I'];
+            const allocation = 1 / normalizedLabels.length;
+            normalizedLabels.forEach(label => {
+                if (!map[label]) map[label] = {
+                    label, contracts: new Set(), total: 0, recebido: 0, a_receber: 0,
+                    liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0,
+                    bloqueado: 0, cancelado: 0, executado: 0
+                };
+                const target = map[label];
+                target.contracts.add(detail.contrato);
+                target.total += (detail.v_empenhado || 0) * allocation;
+                target.recebido += (detail.v_recebido || 0) * allocation;
+                target.a_receber += ((detail.v_empenhado || 0) - (detail.v_recebido || 0)) * allocation;
+                target.liquidado += (detail.v_liquidado || 0) * allocation;
+                target.a_liquidar += (detail.v_a_liquidar || 0) * allocation;
+                target.pago += (detail.v_pago || 0) * allocation;
+                target.a_pagar += (detail.v_a_pagar || 0) * allocation;
+                target.bloqueado += (detail.v_bloqueado || 0) * allocation;
+                target.cancelado += (detail.v_cancelado || 0) * allocation;
+                target.executado += (detail.v_executado || 0) * allocation;
+            });
+        });
+        return Object.values(map).map(item => ({ ...item, count: item.contracts.size }));
+    };
+
     const modData = getPieDataFull('modalidade');
     const secData = getPieDataFull('sec_log');
     const compraData = getPieDataFull('compra');
     const fornData = getPieDataFull('fornecedor');
     const anoVigIniData = getPieDataFull('ano_vig_ini');
-    const aoCodigoData = getPieDataFull('ao_codigo_values');
-    const ndCodigoData = getPieDataFull('nd_codigo_values');
+    const aoCodigoData = getOrcamentarioPieData('ao_codigo');
+    const ndCodigoData = getOrcamentarioPieData('nd_codigo');
     
     // Gráficos Situação restritos a apenas as 7 TAGS
     const allowedSitTags = ['ATIVO INEXEC', 'ATIVO EM EXEC', 'ATIVO EXEC TOT', 'ATIVO EXEC PARC', 'VENC INEXEC TOT', 'VENC EXEC TOT', 'VENC EXEC PARC'];
@@ -1754,9 +2105,6 @@ function Dashboard() {
         if (mode === 'ano') return item.ano_vig_ini;
         if (mode === 'modalidade') return item.modalidade;
         if (mode === 'sec_log') return item.sec_log;
-        if (mode === 'ao_codigo') return item.ao_codigo_values?.length ? item.ao_codigo_values.join('; ') : 'N/I';
-        if (mode === 'nd_codigo') return item.nd_codigo_values?.length ? item.nd_codigo_values.join('; ') : 'N/I';
-        if (mode === 'pi_codigo') return item.pi_cod_values?.length ? item.pi_cod_values.join('; ') : 'N/I';
         return item.fornecedor;
     };
 
@@ -1797,26 +2145,56 @@ function Dashboard() {
         </>
     );
 
-    const top20DataProcessed = useMemo(() => {
+    const buildTop20Data = (viewMode, sortKey) => {
         const map = {};
-        filteredData.forEach(item => {
-            const key = getTop20Key(item, top20ViewMode);
-            if (!map[key]) map[key] = { label: key, count: 0, global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
-            map[key].count += 1; 
-            map[key].global += item.v_global || 0;
-            map[key].total += item.v_empenhado;
-            map[key].recebido += item.v_recebido || 0;
-            map[key].liquidado += item.v_liquidado;
-            map[key].a_liquidar += item.v_a_liquidar;
-            map[key].pago += item.v_pago;
-            map[key].a_pagar += item.v_a_pagar;
-            map[key].bloqueado += item.v_bloqueado;
-            map[key].cancelado += item.v_cancelado;
-            map[key].executado += item.v_executado;
-        });
+        const budgetDimensionMap = { ao_codigo: 'ao_codigo', nd_codigo: 'nd_codigo', pi_codigo: 'pi_codigo' };
+        const budgetDimensionKey = budgetDimensionMap[viewMode];
+
+        if (budgetDimensionKey) {
+            filteredOrcamentarioDetails.forEach(detail => {
+                const rawKey = detail[budgetDimensionKey] || 'N/I';
+                const keys = budgetDimensionKey === 'nd_codigo' ? splitBudgetDimensionValue(rawKey) : [rawKey];
+                const normalizedKeys = keys.length ? keys : ['N/I'];
+                const allocation = 1 / normalizedKeys.length;
+                normalizedKeys.forEach(key => {
+                    if (!map[key]) map[key] = { label: key, contracts: new Set(), global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: '' };
+                    const target = map[key];
+                    target.contracts.add(detail.contrato);
+                    target.total += (detail.v_empenhado || 0) * allocation;
+                    target.recebido += (detail.v_recebido || 0) * allocation;
+                    target.liquidado += (detail.v_liquidado || 0) * allocation;
+                    target.a_liquidar += (detail.v_a_liquidar || 0) * allocation;
+                    target.pago += (detail.v_pago || 0) * allocation;
+                    target.a_pagar += (detail.v_a_pagar || 0) * allocation;
+                    target.bloqueado += (detail.v_bloqueado || 0) * allocation;
+                    target.cancelado += (detail.v_cancelado || 0) * allocation;
+                    target.executado += (detail.v_executado || 0) * allocation;
+                });
+            });
+        } else {
+            filteredData.forEach(item => {
+                const key = getTop20Key(item, viewMode);
+                if (!map[key]) map[key] = { label: key, contracts: new Set(), global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
+                const target = map[key];
+                target.contracts.add(item.contrato);
+                target.global += item.v_global || 0;
+                target.total += item.v_empenhado || 0;
+                target.recebido += item.v_recebido || 0;
+                target.liquidado += item.v_liquidado || 0;
+                target.a_liquidar += item.v_a_liquidar || 0;
+                target.pago += item.v_pago || 0;
+                target.a_pagar += item.v_a_pagar || 0;
+                target.bloqueado += item.v_bloqueado || 0;
+                target.cancelado += item.v_cancelado || 0;
+                target.executado += item.v_executado || 0;
+            });
+        }
+
+        const totalEmpenhadoOrcamentario = Object.values(map).reduce((sum, item) => sum + item.total, 0);
         let arr = Object.values(map).map(item => ({
             ...item,
-            p_empenhado: item.global ? item.total / item.global : 0,
+            count: item.contracts.size,
+            p_empenhado: item.global ? item.total / item.global : (totalEmpenhadoOrcamentario ? item.total / totalEmpenhadoOrcamentario : 0),
             p_recebido: item.total ? item.recebido / item.total : 0,
             p_liquidado: item.total ? item.liquidado / item.total : 0,
             p_pago: item.total ? item.pago / item.total : 0,
@@ -1825,42 +2203,19 @@ function Dashboard() {
             p_a_liquidar: item.total ? Math.max(0, item.a_liquidar) / item.total : 0,
             p_a_pagar: item.total ? Math.max(0, item.a_pagar) / item.total : 0
         }));
-        sortTop20Array(arr, top20Sort);
-        return arr.slice(0, 20); 
-    }, [filteredData, top20Sort, top20ViewMode]);
-    
-    // Novo Processamento para o Gráfico 100%
-    const top20100DataProcessed = useMemo(() => {
-        const map = {};
-        filteredData.forEach(item => {
-            const key = getTop20Key(item, top20100ViewMode);
-            if (!map[key]) map[key] = { label: key, count: 0, global: 0, total: 0, recebido: 0, liquidado: 0, a_liquidar: 0, pago: 0, a_pagar: 0, bloqueado: 0, cancelado: 0, executado: 0, fornecedor: item.fornecedor };
-            map[key].count += 1; 
-            map[key].global += item.v_global || 0;
-            map[key].total += item.v_empenhado;
-            map[key].recebido += item.v_recebido || 0;
-            map[key].liquidado += item.v_liquidado;
-            map[key].a_liquidar += item.v_a_liquidar;
-            map[key].pago += item.v_pago;
-            map[key].a_pagar += item.v_a_pagar;
-            map[key].bloqueado += item.v_bloqueado;
-            map[key].cancelado += item.v_cancelado;
-            map[key].executado += item.v_executado;
-        });
-        let arr = Object.values(map).map(item => ({
-            ...item,
-            p_empenhado: item.global ? item.total / item.global : 0,
-            p_recebido: item.total ? item.recebido / item.total : 0,
-            p_liquidado: item.total ? item.liquidado / item.total : 0,
-            p_pago: item.total ? item.pago / item.total : 0,
-            p_cancelado: item.total ? item.cancelado / item.total : 0,
-            p_bloqueado: item.total ? item.bloqueado / item.total : 0,
-            p_a_liquidar: item.total ? Math.max(0, item.a_liquidar) / item.total : 0,
-            p_a_pagar: item.total ? Math.max(0, item.a_pagar) / item.total : 0
-        }));
-        sortTop20Array(arr, top20100Sort);
-        return arr.slice(0, 20); 
-    }, [filteredData, top20100Sort, top20100ViewMode]);
+        sortTop20Array(arr, sortKey);
+        return arr.slice(0, 20);
+    };
+
+    const top20DataProcessed = useMemo(
+        () => buildTop20Data(top20ViewMode, top20Sort),
+        [filteredData, filteredOrcamentarioDetails, top20Sort, top20ViewMode]
+    );
+
+    const top20100DataProcessed = useMemo(
+        () => buildTop20Data(top20100ViewMode, top20100Sort),
+        [filteredData, filteredOrcamentarioDetails, top20100Sort, top20100ViewMode]
+    );
 
     const contratoChartData = useMemo(() => {
         let arr = [...filteredData];
@@ -1923,6 +2278,8 @@ function Dashboard() {
                 v_liquidado: d.v_liquidado || 0,
                 v_pago: d.v_pago || 0,
                 perc_tempo: d.perc_tempo || 0,
+                dias_passaram: d.dias_passaram,
+                duracao_total_dias: d.duracao_total_dias,
                 situacao: d.situacao,
                 color: hexColor
             };
@@ -1944,6 +2301,9 @@ function Dashboard() {
         'contrato', 'situacao', 'secLog', 'fornecedor', 'objeto', 'gestorFiscal', 'ao', 'po', 'nd', 'dataInic', 'dataFim', 'percTempo', 'diasPassaram', 'encerrandoDias'
     ].filter(k => masterVisibleCols[k]).length;
 
+    const masterLeadingTextColCount = ['contrato', 'situacao', 'secLog', 'fornecedor', 'objeto', 'gestorFiscal']
+        .filter(key => masterVisibleCols[key]).length;
+
     const getMasterExportCols = () => {
         let cols = [];
         if (masterVisibleCols.contrato) cols.push({ header: "CONTRATO", key: "contrato" });
@@ -1952,14 +2312,14 @@ function Dashboard() {
         if (masterVisibleCols.fornecedor) cols.push({ header: "FORNECEDOR", key: "fornecedor" });
         if (masterVisibleCols.objeto) cols.push({ header: "OBJETO", key: "objeto" });
         if (masterVisibleCols.gestorFiscal) cols.push({ header: "GESTOR/FISCAL", key: "gestor", format: (r) => `GT: ${r.gestor} | GS: ${r.gestor_sub} | FT: ${r.fiscal} | FS: ${r.fiscal_sub}` });
-        if (masterVisibleCols.ao) cols.push({ header: "AO", key: "ao_codigos" });
-        if (masterVisibleCols.po) cols.push({ header: "PO", key: "po_codigos" });
-        if (masterVisibleCols.nd) cols.push({ header: "ND", key: "nd_codigos" });
         if (masterVisibleCols.dataInic) cols.push({ header: "INÍCIO", key: "data_inic" });
         if (masterVisibleCols.dataFim) cols.push({ header: "FIM", key: "data_fim" });
         if (masterVisibleCols.percTempo) cols.push({ header: "% TEMPO", key: "perc_tempo", isPercent: true });
         if (masterVisibleCols.diasPassaram) cols.push({ header: "PASSARAM", key: "dias_passaram" });
         if (masterVisibleCols.encerrandoDias) cols.push({ header: "FALTAM", key: "encerrando_dias" });
+        if (masterVisibleCols.ao) cols.push({ header: "AO", key: "ao_codigos" });
+        if (masterVisibleCols.po) cols.push({ header: "PO", key: "po_codigos" });
+        if (masterVisibleCols.nd) cols.push({ header: "ND", key: "nd_codigos" });
         if (masterVisibleCols.difGlobal) cols.push({ header: "GLOBAL-EMP", key: "dif_global", isCurrency: true });
         if (masterVisibleCols.vGlobal) cols.push({ header: "GLOBAL", key: "v_global", isCurrency: true });
         if (masterVisibleCols.empenhado) cols.push({ header: "EMPENHADO", key: "v_empenhado", isCurrency: true });
@@ -1984,6 +2344,41 @@ function Dashboard() {
         return cols;
     };
 
+    const renderBudgetDetailRow = (detail, key) => (
+        <tr key={key} className="budget-detail-row border-t border-blue-100 bg-blue-50/60">
+            {masterLeadingTextColCount > 0 && <td colSpan={masterLeadingTextColCount} className="master-text-col p-3 text-[9px] font-black text-blue-700 uppercase tracking-wider">Detalhe AO–PO–ND</td>}
+            {masterVisibleCols.dataInic && <td className="p-3 text-center text-slate-300">—</td>}
+            {masterVisibleCols.dataFim && <td className="p-3 text-center text-slate-300">—</td>}
+            {masterVisibleCols.percTempo && <td className="p-3 text-center text-slate-300">—</td>}
+            {masterVisibleCols.diasPassaram && <td className="p-3 text-center text-slate-300">—</td>}
+            {masterVisibleCols.encerrandoDias && <td className="p-3 text-center text-slate-300">—</td>}
+            {masterVisibleCols.ao && <td className="master-code-col p-3 font-black text-blue-800" title={`${detail.ao_nome} – ${detail.ao_codigo}`}>{detail.ao_codigo}</td>}
+            {masterVisibleCols.po && <td className="master-code-col p-3 font-black text-blue-800" title={`${detail.po_nome} – ${detail.po_codigo}`}>{detail.po_codigo}</td>}
+            {masterVisibleCols.nd && <td className="master-code-col p-3 font-black text-blue-800" title={`${detail.nd_nome} – ${detail.nd_codigo}`}>{detail.nd_codigo}</td>}
+            {masterVisibleCols.difGlobal && <td className="p-3 text-center text-[8px] font-black text-blue-700 uppercase">AO–PO–ND</td>}
+            {masterVisibleCols.vGlobal && <td className="p-3 text-center text-slate-300">—</td>}
+            {masterVisibleCols.empenhado && <td className="p-3 text-right font-bold text-blue-700">{formatBRL(detail.v_empenhado)}</td>}
+            {masterVisibleCols.recebido && <td className="p-3 text-right font-bold text-violet-700">{formatBRL(detail.v_recebido)}</td>}
+            {masterVisibleCols.pRecebido && <td className="p-3 text-center font-bold text-violet-700">{formatPercentBR(detail.p_recebido)}</td>}
+            {masterVisibleCols.liquidado && <td className="p-3 text-right font-bold text-amber-600">{formatBRL(detail.v_liquidado)}</td>}
+            {masterVisibleCols.pLiquidado && <td className="p-3 text-center font-bold">{formatPercentBR(detail.p_liquidado)}</td>}
+            {masterVisibleCols.aLiquidar && <td className="p-3 text-right font-bold text-amber-500">{formatBRL(detail.v_a_liquidar)}</td>}
+            {masterVisibleCols.pALiquidar && <td className="p-3 text-center font-bold">{formatPercentBR(detail.p_a_liquidar)}</td>}
+            {masterVisibleCols.pago && <td className="p-3 text-right font-bold text-emerald-600">{formatBRL(detail.v_pago)}</td>}
+            {masterVisibleCols.pPago && <td className="p-3 text-center font-bold">{formatPercentBR(detail.p_pago)}</td>}
+            {masterVisibleCols.aPagar && <td className="p-3 text-right font-bold text-emerald-500">{formatBRL(detail.v_a_pagar)}</td>}
+            {masterVisibleCols.pAPagar && <td className="p-3 text-center font-bold">{formatPercentBR(detail.p_a_pagar)}</td>}
+            {masterVisibleCols.bloqueado && <td className="p-3 text-right font-bold text-rose-600">{formatBRL(detail.v_bloqueado)}</td>}
+            {masterVisibleCols.pBloqueado && <td className="p-3 text-center font-bold">{formatPercentBR(detail.p_bloqueado)}</td>}
+            {masterVisibleCols.cancelado && <td className="p-3 text-right font-bold text-red-600">{formatBRL(detail.v_cancelado)}</td>}
+            {masterVisibleCols.pCancelado && <td className="p-3 text-center font-bold">{formatPercentBR(detail.p_cancelado)}</td>}
+            {masterVisibleCols.executado && <td className="p-3 text-right font-bold text-blue-600">{formatBRL(detail.v_executado)}</td>}
+            {masterVisibleCols.pExecutado && <td className="p-3 text-center font-bold text-blue-800">{formatPercentBR(detail.p_executado)}</td>}
+            {masterVisibleCols.execLiq && <td className="p-3 text-right font-bold text-violet-600">{formatBRL(detail.v_pago)}</td>}
+            {masterVisibleCols.pExecLiq && <td className="p-3 text-center font-bold text-violet-800">{formatPercentBR(detail.p_exec_liq)}</td>}
+        </tr>
+    );
+
     if (loading) return (
         <div className="h-screen flex flex-col items-center justify-center font-black text-slate-400 gap-4">
             <div className="w-12 h-12 border-4 border-slate-300 border-t-slate-800 rounded-full animate-spin"></div>
@@ -1997,12 +2392,9 @@ function Dashboard() {
                 <div>
                     <h1 className="text-3xl font-black uppercase tracking-tighter text-slate-800">PAINEL GERAL DE CONTRATOS</h1>
                     <p className={`text-[11px] font-bold mt-1 ${status.includes("Erro") || status.includes("falhou") || status.includes("Falha") ? "text-red-600" : "text-emerald-600"}`}>● {status}</p>
-                    <p className="text-[11px] italic text-blue-600 mt-0.5">Produzido por Cel Brito.</p>
-                    <p className="text-[10px] font-black text-slate-500 mt-0.5 uppercase tracking-widest">Versão V20</p>
                 </div>
                 <div className="flex flex-nowrap gap-3 items-center bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm overflow-x-auto max-w-full">
-                    <span className="text-[11px] font-black text-slate-400 uppercase tracking-tight whitespace-nowrap">CARGA MANUAL:</span>
-                    <input type="file" accept=".csv" onChange={(e) => { const r = new FileReader(); r.onload = (ev) => loadData(false, ev.target.result); r.readAsText(e.target.files[0]); }} className="text-[10px] cursor-pointer text-blue-600 font-bold w-[190px] shrink-0" />
+                    <AccessMetadata />
                     <div className="w-[1px] h-8 bg-slate-300 mx-1 hidden md:block shrink-0"></div>
                     <button onClick={() => loadData(true, null)} className="text-[11px] font-black text-white bg-blue-600 px-4 py-3 rounded-lg shadow hover:bg-blue-700 transition uppercase tracking-wider whitespace-nowrap shrink-0">SINCRONIZAR APIs</button>
                     <span className="text-[11px] font-black text-slate-500 uppercase whitespace-nowrap ml-1 shrink-0">
@@ -2031,12 +2423,14 @@ function Dashboard() {
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ações Rápidas (Tempo e Status):</span>
                     <div className="flex flex-wrap gap-2 items-center">
                         <button onClick={toggleCSup} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isCSupActive ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>C SUP</button>
-                        <button onClick={toggleHoje} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isHojeActive ? 'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTRATOS VIGENTES</button>
+                        <button onClick={toggleNonCSup} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isNonCSupActive ? 'bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>- C SUP</button>
+                        <button onClick={clearAllFilters} className="text-[9px] font-bold uppercase bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700 transition shadow-md border border-slate-800">Limpar Filtros</button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 items-center">
                         <button onClick={toggleVencendo7} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVencendo7Active ? 'bg-lime-600 text-white border-lime-600 ring-2 ring-lime-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VENCENDO EM 7 DIAS</button>
                         <button onClick={toggleVencendo30} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isVencendo30Active ? 'bg-teal-600 text-white border-teal-600 ring-2 ring-teal-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR VENCENDO EM 30 DIAS</button>
                         <button onClick={toggleSevenDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isSevenActive ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR 7 DIAS ATRÁS</button>
                         <button onClick={toggleThirtyDays} className={`text-[9px] font-bold uppercase px-3 py-1.5 rounded transition shadow-sm border ${isThirtyActive ? 'bg-orange-600 text-white border-orange-600 ring-2 ring-orange-400 ring-offset-1' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>CONTR 30 DIAS ATRÁS</button>
-                        <button onClick={clearAllFilters} className="text-[9px] font-bold uppercase bg-slate-800 text-white px-3 py-1.5 rounded hover:bg-slate-700 transition shadow-md border border-slate-800">Limpar Filtros</button>
                     </div>
                     <div className="flex flex-wrap gap-2 items-center">
                         {Object.entries(tagColorsMap).map(([label, config]) => {
@@ -2082,7 +2476,7 @@ function Dashboard() {
             </div>
 
             <CollapsibleSection title="INDICADORES DE DESEMPENHO (KPIs)" defaultOpen={false} globalTrigger={expandTrigger} globalState={globalExpandState}>
-            <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4 mb-4">
+            <div className="max-w-[1600px] mx-auto grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-9 gap-4 mb-4">
                 <KPICard title="QTD Contratos" value={kpis.qtdContratos} color="slate" isCurrency={false} />
                 <KPICard title="QTD Ativos" value={kpis.qtdAtivos} extraText={`Inexec: ${kpis.qtdAtivosInexec}\nEm Exec: ${kpis.qtdAtivosEmExec}\nExec Tot: ${kpis.qtdAtivosExecTot}\nExec Parc: ${kpis.qtdAtivosExecParc}`} color="blue" isCurrency={false} />
                 <KPICard title="QTD Vencidos" value={kpis.qtdVencidos} extraText={`Inexec Tot: ${kpis.qtdVencInexecTot}\nExec Tot: ${kpis.qtdVencidosTot}\nExec Parc: ${kpis.qtdVencidosParc}`} color="slate" isCurrency={false} />
@@ -2093,14 +2487,16 @@ Substituto: ${kpis.qtdGestoresSub}`} color="amber" isCurrency={false} />
                 <KPICard title="QTD Fiscais" value={kpis.qtdFiscais} extraText={`Titular: ${kpis.qtdFiscaisTit}
 Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                 <KPICard title="QTD Fornecedores" value={kpis.qtdFornecedores} color="violet" isCurrency={false} />
+                <KPICard title="QTD Sec Log" value={kpis.qtdSecLog} color="cyan" isCurrency={false} />
             </div>
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-4 mb-8">
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-9 gap-4 mb-8">
                 <KPICard title="Global" value={kpis.global} color="slate" isCurrency={true} />
                 <KPICard title="Empenhado" value={kpis.emp} subValue={kpis.pEmpGlobal} subLabel="do Global" diffLabel="Dif (Glob-Emp)" diffValue={kpis.global - kpis.emp} color="blue" isCurrency={true} />
-                <KPICard title="Liquidado" value={kpis.liq} subValue={kpis.pLiq} diffLabel="Dif (Emp-Liq)" diffValue={kpis.emp - kpis.liq} color="amber" isCurrency={true} />
+                <KPICard title="Recebido" value={kpis.rec} subValue={kpis.pRec} diffLabel="Dif (Emp-Rcb)" diffValue={kpis.emp - kpis.rec} color="violet" isCurrency={true} />
+                <KPICard title="Liquidado" value={kpis.liq} subValue={kpis.pLiq} diffLabel="Dif (Rcb-Liq)" diffValue={kpis.rec - kpis.liq} color="amber" isCurrency={true} />
                 <KPICard title="Pago" value={kpis.pag} subValue={kpis.pPag} diffLabel="Dif (Liq-Pag)" diffValue={kpis.liq - kpis.pag} color="emerald" isCurrency={true} />
-                <KPICard title="Bloqueado" value={kpis.blo} subValue={kpis.pBlo} color="orange" isCurrency={true} />
-                <KPICard title="Cancelado" value={kpis.can} subValue={kpis.pCan} color="red" isCurrency={true} />
+                <KPICard title="Bloqueado" value={kpis.blo} subValue={kpis.pBlo} diffLabel="Dif (Emp-Blq)" diffValue={kpis.emp - kpis.blo} color="orange" isCurrency={true} />
+                <KPICard title="Cancelado" value={kpis.can} subValue={kpis.pCan} diffLabel="Dif (Emp-Can)" diffValue={kpis.emp - kpis.can} color="red" isCurrency={true} />
                 <KPICard title="Executado" value={kpis.exe} subValue={kpis.pExe} color="blue" isCurrency={true} />
                 <KPICard title="Executado Líquido" value={kpis.pag} subValue={kpis.pPag} color="violet" isCurrency={true} />
             </div>
@@ -2154,35 +2550,59 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
             </div>
 
             {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 1) */}
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-                <ToggleableChartCard id="pModV" title="Empenhado (Mod)" data={modData} isFinancial={true} />
-                <ToggleableChartCard id="pModQ" title="QTD Contratos (Mod)" data={modData} isFinancial={false} />
-                <ToggleableChartCard id="pSecV" title="Empenhado (SEC)" data={secData} isFinancial={true} />
-                <ToggleableChartCard id="pSecQ" title="QTD Contratos (SEC)" data={secData} isFinancial={false} />
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="md:col-span-2 text-center text-sm font-black text-slate-700 uppercase tracking-widest">Modalidade</h3>
+                    <ToggleableChartCard id="pModV" title="Empenhado (Mod)" data={modData} isFinancial={true} />
+                    <ToggleableChartCard id="pModQ" title="QTD Contratos (Mod)" data={modData} isFinancial={false} />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="md:col-span-2 text-center text-sm font-black text-slate-700 uppercase tracking-widest">Seção Logística</h3>
+                    <ToggleableChartCard id="pSecV" title="Empenhado (SEC)" data={secData} isFinancial={true} />
+                    <ToggleableChartCard id="pSecQ" title="QTD Contratos (SEC)" data={secData} isFinancial={false} />
+                </div>
             </div>
 
             {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 2) */}
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-                <ToggleableChartCard id="pCompV" title="Empenhado (Nr Compra)" data={compraData} isFinancial={true} />
-                <ToggleableChartCard id="pCompQ" title="QTD Contratos (Nr Compra)" data={compraData} isFinancial={false} />
-                <ToggleableChartCard id="pFornV" title="Empenhado (Fornecedor)" data={fornData} isFinancial={true} isFornecedor={true} />
-                <ToggleableChartCard id="pFornQ" title="QTD Contratos (Fornecedor)" data={fornData} isFinancial={false} isFornecedor={true} />
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="md:col-span-2 text-center text-sm font-black text-slate-700 uppercase tracking-widest">Número da Compra</h3>
+                    <ToggleableChartCard id="pCompV" title="Empenhado (Nr Compra)" data={compraData} isFinancial={true} />
+                    <ToggleableChartCard id="pCompQ" title="QTD Contratos (Nr Compra)" data={compraData} isFinancial={false} />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="md:col-span-2 text-center text-sm font-black text-slate-700 uppercase tracking-widest">Fornecedor</h3>
+                    <ToggleableChartCard id="pFornV" title="Empenhado (Fornecedor)" data={fornData} isFinancial={true} isFornecedor={true} />
+                    <ToggleableChartCard id="pFornQ" title="QTD Contratos (Fornecedor)" data={fornData} isFinancial={false} isFornecedor={true} />
+                </div>
             </div>
 
             {/* GRÁFICOS INTERATIVOS DE PIZZA / BARRAS VERTICAIS (LINHA 3) */}
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
-                <ToggleableChartCard id="pAnoVigV" title="Empenhado (Ano Vig Ini)" data={anoVigIniData} isFinancial={true} />
-                <ToggleableChartCard id="pAnoVigQ" title="QTD Contratos (Ano Vig Ini)" data={anoVigIniData} isFinancial={false} />
-                <ToggleableChartCard id="pSitV" title="Empenhado (Situação)" data={situacaoData} isFinancial={true} />
-                <ToggleableChartCard id="pSitQ" title="QTD Contratos (Situação)" data={situacaoData} isFinancial={false} />
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 xl:grid-cols-2 gap-6 mb-10">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="md:col-span-2 text-center text-sm font-black text-slate-700 uppercase tracking-widest">Ano de Início da Vigência</h3>
+                    <ToggleableChartCard id="pAnoVigV" title="Empenhado (Ano Vig Ini)" data={anoVigIniData} isFinancial={true} />
+                    <ToggleableChartCard id="pAnoVigQ" title="QTD Contratos (Ano Vig Ini)" data={anoVigIniData} isFinancial={false} />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="md:col-span-2 text-center text-sm font-black text-slate-700 uppercase tracking-widest">Situação</h3>
+                    <ToggleableChartCard id="pSitV" title="Empenhado (Situação)" data={situacaoData} isFinancial={true} />
+                    <ToggleableChartCard id="pSitQ" title="QTD Contratos (Situação)" data={situacaoData} isFinancial={false} />
+                </div>
             </div>
 
             {/* GRÁFICOS POR CLASSIFICAÇÃO ORÇAMENTÁRIA */}
-            <div className="max-w-[1600px] mx-auto grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-10">
-                <ToggleableChartCard id="pAoCodigoV" title="Empenhado (AO Código)" data={aoCodigoData} isFinancial={true} />
-                <ToggleableChartCard id="pAoCodigoQ" title="QTD Contratos (AO Código)" data={aoCodigoData} isFinancial={false} />
-                <ToggleableChartCard id="pNdCodigoV" title="Empenhado (ND Código)" data={ndCodigoData} isFinancial={true} />
-                <ToggleableChartCard id="pNdCodigoQ" title="QTD Contratos (ND Código)" data={ndCodigoData} isFinancial={false} />
+            <div className="max-w-[1600px] mx-auto grid grid-cols-1 xl:grid-cols-2 gap-6 mb-10">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="md:col-span-2 text-center text-sm font-black text-slate-700 uppercase tracking-widest">AO Código</h3>
+                    <ToggleableChartCard id="pAoCodigoV" title="Empenhado (AO Código)" data={aoCodigoData} isFinancial={true} />
+                    <ToggleableChartCard id="pAoCodigoQ" title="QTD Contratos (AO Código)" data={aoCodigoData} isFinancial={false} />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <h3 className="md:col-span-2 text-center text-sm font-black text-slate-700 uppercase tracking-widest">ND Código</h3>
+                    <ToggleableChartCard id="pNdCodigoV" title="Empenhado (ND Código)" data={ndCodigoData} isFinancial={true} />
+                    <ToggleableChartCard id="pNdCodigoQ" title="QTD Contratos (ND Código)" data={ndCodigoData} isFinancial={false} />
+                </div>
             </div>
 
             </CollapsibleSection>
@@ -2294,6 +2714,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 // Fundo / Stack de Componentes da Despesa (Somam 100% do Empenho) - Agrupados juntos e com Z-index mais baixo
                                 { label: 'Liquidado %', data: top20100DataProcessed.map(d => d.total ? (d.liquidado / d.total) * 100 : 0), backgroundColor: '#f59e0b', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } },
                                 { label: 'A Liquidar %', data: top20100DataProcessed.map(d => d.p_a_liquidar * 100), backgroundColor: '#cbd5e1', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#1e293b', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } },
+                                { label: 'Pago %', data: top20100DataProcessed.map(d => d.p_pago * 100), backgroundColor: 'transparent', borderColor: '#111827', borderWidth: { top: 4, right: 0, bottom: 0, left: 0 }, xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '4', order: 2, datalabels: { display: false } },
                                 { label: 'Bloqueado %', data: top20100DataProcessed.map(d => d.total ? (d.bloqueado / d.total) * 100 : 0), backgroundColor: '#f97316', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } },
                                 { label: 'Cancelado %', data: top20100DataProcessed.map(d => d.total ? (d.cancelado / d.total) * 100 : 0), backgroundColor: '#ef4444', xAxisID: 'x', yAxisID: 'y', grouped: false, stack: '1', order: 4, datalabels: { display: function(ctx) { return ctx.dataset.data[ctx.dataIndex] >= 4; }, color: '#fff', rotation: -90, align: 'center', anchor: 'center', font: { size: 9, weight: 'bold' }, formatter: (v) => `${v.toFixed(1).replace('.', ',')}%` } }
                             ]
@@ -2325,17 +2746,24 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                             if (label.includes('Recebido')) absVal = d.recebido;
                                             else if (label.includes('Liquidado')) absVal = d.liquidado;
                                             else if (label.includes('A Liquidar')) absVal = Math.max(0, d.a_liquidar);
+                                            else if (label.includes('Pago')) absVal = d.pago;
                                             else if (label.includes('Bloqueado')) absVal = d.bloqueado;
                                             else if (label.includes('Cancelado')) absVal = d.cancelado;
                                             else if (label.includes('Empenhado')) absVal = d.total;
                                             
                                             const cleanLabel = label === 'Empenhado (100 %)' ? 'Empenhado' : label.replace(/ %$/, '');
-                                            return `${cleanLabel}: ${percentStr} (${formatBRL(absVal)})`;
+                                            return label === 'Empenhado (100 %)'
+                                                ? `${cleanLabel}: ${formatBRL(absVal)}`
+                                                : `${cleanLabel}: ${formatBRL(absVal)} (${percentStr})`;
+                                        },
+                                        afterBody: function(context) {
+                                            const d = top20100DataProcessed[context[0].dataIndex];
+                                            return `A Pagar: ${formatBRL(Math.max(0, d.a_pagar))} (${formatPercentBR(d.p_a_pagar)})`;
                                         }
                                     }
                                 }, 
                                 datalabels: { display: true },
-                                legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 }, sort: (a, b) => ['QTD Contratos', 'Empenhado (100 %)', 'Recebido %', 'Liquidado %', 'A Liquidar %', 'Bloqueado %', 'Cancelado %'].indexOf(a.text) - ['QTD Contratos', 'Empenhado (100 %)', 'Recebido %', 'Liquidado %', 'A Liquidar %', 'Bloqueado %', 'Cancelado %'].indexOf(b.text) } }
+                                legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 }, sort: (a, b) => ['QTD Contratos', 'Empenhado (100 %)', 'Recebido %', 'Liquidado %', 'A Liquidar %', 'Pago %', 'Bloqueado %', 'Cancelado %'].indexOf(a.text) - ['QTD Contratos', 'Empenhado (100 %)', 'Recebido %', 'Liquidado %', 'A Liquidar %', 'Pago %', 'Bloqueado %', 'Cancelado %'].indexOf(b.text) } }
                             },
                             scales: { 
                                 x: { stacked: true, ticks: { maxRotation: 90, minRotation: 45, font: { size: 9, weight: 'bold' }, autoSkip: false } }, 
@@ -2430,7 +2858,9 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 }
                             ]
                         }} options={{ 
-                            indexAxis: 'x', responsive: true, maintainAspectRatio: false, plugins: { tooltip: getFullTooltipContrato(contratoChartData), datalabels: { display: false }, legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 } } } },
+                            indexAxis: 'x', responsive: true, maintainAspectRatio: false,
+                            interaction: { mode: 'index', intersect: false },
+                            plugins: { tooltip: getFullTooltipContrato(contratoChartData), datalabels: { display: false }, legend: { position: 'top', labels: { boxWidth: 10, font: { size: 9 } } } },
                             scales: { 
                                 x: { ticks: { maxRotation: 90, minRotation: 45, font: { size: 9, weight: 'bold' }, autoSkip: false } },
                                 y_perc: { type: 'linear', position: 'left', ticks: { callback: v => (v * 100).toFixed(0) + '%' }, grace: '10%', beginAtZero: true }, 
@@ -2535,7 +2965,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
             <div className="max-w-[1600px] mx-auto bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden mb-10">
                 <div className="bg-slate-800 px-4 py-3 flex justify-between items-center flex-wrap gap-2">
                     <h3 className="text-white text-xs font-black tracking-widest uppercase">
-                        Detalhamento Financeiro ({kpis.qtdContratos} Contratos Únicos | Mostrando {Math.min(100, filteredData.length)} Lançamentos)
+                        Detalhamento da Execução ({kpis.qtdContratos} Contratos Únicos | Mostrando {Math.min(100, filteredData.length)} Lançamentos)
                     </h3>
                     <div className="flex gap-2 items-center">
                         <div className="relative">
@@ -2556,7 +2986,7 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                         <div className="w-[1px] h-5 bg-slate-500 mx-1 hidden sm:block"></div>
                         <button onClick={() => exportTable.toExcel(filteredData, "Detalhamento_Master", getMasterExportCols())} className="text-[10px] font-bold bg-green-600 text-white px-3 py-1 rounded">EXCEL</button>
                         <button onClick={() => exportTable.toCSV(filteredData, "Detalhamento_Master", getMasterExportCols())} className="text-[10px] font-bold bg-blue-600 text-white px-3 py-1 rounded">CSV</button>
-                        <button onClick={() => exportTable.toPDF(filteredData, "Detalhamento_Master", getMasterExportCols(), "DETALHAMENTO FINANCEIRO MASTER")} className="text-[10px] font-bold bg-red-600 text-white px-3 py-1 rounded">PDF</button>
+                        <button onClick={() => exportTable.toPDF(filteredData, "Detalhamento_Master", getMasterExportCols(), "DETALHAMENTO DA EXECUÇÃO")} className="text-[10px] font-bold bg-red-600 text-white px-3 py-1 rounded">PDF</button>
                     </div>
                 </div>
                 <div className="overflow-x-auto h-[600px]">
@@ -2569,14 +2999,14 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                 {masterVisibleCols.fornecedor && <TextHeader widthClass="master-text-col w-[10%]" label="Fornecedor" field="fornecedor" current={sortConfig} onSort={handleSort} searchVal={searchFornecedor} onSearchChange={setSearchFornecedor} />}
                                 {masterVisibleCols.objeto && <TextHeader widthClass="master-text-col w-[10%]" label="Objeto" field="objeto" current={sortConfig} onSort={handleSort} searchVal={searchObjeto} onSearchChange={setSearchObjeto} />}
                                 {masterVisibleCols.gestorFiscal && <TextHeader widthClass="master-text-col w-[7%]" label="Gestores/Fiscais" field="gestor" current={sortConfig} onSort={handleSort} searchVal={searchGestorFiscal} onSearchChange={setSearchGestorFiscal} />}
-                                {masterVisibleCols.ao && <TextHeader widthClass="master-text-col" label="AO" field="ao_codigos" current={sortConfig} onSort={handleSort} />}
-                                {masterVisibleCols.po && <TextHeader widthClass="master-text-col" label="PO" field="po_codigos" current={sortConfig} onSort={handleSort} />}
-                                {masterVisibleCols.nd && <TextHeader widthClass="master-text-col" label="ND" field="nd_codigos" current={sortConfig} onSort={handleSort} />}
                                 {masterVisibleCols.dataInic && <DateFilterHeader widthClass="w-[5%]" label="Início" field="data_inic" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />}
                                 {masterVisibleCols.dataFim && <DateFilterHeader widthClass="w-[5%]" label="Fim" field="data_fim" current={sortConfig} onSort={handleSort} dateFilters={dateFilters} setDateFilters={setDateFilters} align="center" />}
                                 {masterVisibleCols.percTempo && <NumericHeader widthClass="w-[6%]" label="% Tempo" field="perc_tempo" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
                                 {masterVisibleCols.diasPassaram && <NumericHeader widthClass="w-[5%]" label="Passaram" field="dias_passaram" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
                                 {masterVisibleCols.encerrandoDias && <NumericHeader widthClass="w-[5%]" label="Faltam" field="encerrando_dias" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="center" />}
+                                {masterVisibleCols.ao && <TextHeader widthClass="master-code-col" label="AO" field="ao_codigos" current={sortConfig} onSort={handleSort} searchVal={searchAo} onSearchChange={setSearchAo} />}
+                                {masterVisibleCols.po && <TextHeader widthClass="master-code-col" label="PO" field="po_codigos" current={sortConfig} onSort={handleSort} searchVal={searchPo} onSearchChange={setSearchPo} />}
+                                {masterVisibleCols.nd && <TextHeader widthClass="master-code-col" label="ND" field="nd_codigos" current={sortConfig} onSort={handleSort} searchVal={searchNd} onSearchChange={setSearchNd} />}
                                 {masterVisibleCols.difGlobal && <NumericHeader widthClass="w-[6%]" label="GLOBAL-EMP" field="dif_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
                                 {masterVisibleCols.vGlobal && <NumericHeader widthClass="w-[6%]" label="Global" field="v_global" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
                                 {masterVisibleCols.empenhado && <NumericHeader widthClass="w-[6%]" label="Empenhado" field="v_empenhado" current={sortConfig} onSort={handleSort} numFilters={numFilters} setNumFilters={setNumFilters} align="right" />}
@@ -2601,8 +3031,12 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {filteredData.slice(0, 100).map((row, i) => (
-                                <tr key={i} className="hover:bg-blue-50 transition-colors">
+                            {filteredData.slice(0, 100).map((row, i) => {
+                                const budgetDetails = budgetBreakdownByContract[row.contrato] || [];
+                                const budgetExpanded = expandedBudgetContracts.includes(row.contrato);
+                                return (
+                                <React.Fragment key={`${row.contrato}-${i}`}>
+                                <tr className="hover:bg-blue-50 transition-colors">
                                     {masterVisibleCols.contrato && <td className="master-text-col p-3 font-black text-slate-800 break-words">
                                         {row.contrato}
                                         <div className="text-[8px] font-normal text-slate-500 mt-1 leading-tight">Compra: {row.compra}<br/>Mod: {row.modalidade}</div>
@@ -2629,15 +3063,22 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                         <div className="font-bold text-slate-700 mt-1" title="Fiscal Titular">FT: {row.fiscal}</div>
                                         {row.fiscal_sub !== 'N/I' && <div className="text-[9px] text-slate-500" title="Fiscal Substituto">FS: {row.fiscal_sub}</div>}
                                     </td>}
-                                    {masterVisibleCols.ao && <td className="master-text-col p-3 text-slate-600 font-bold" title={(row.ao_filter_values || []).join('\n')}>{row.ao_codigos}</td>}
-                                    {masterVisibleCols.po && <td className="master-text-col p-3 text-slate-600 font-bold" title={(row.po_filter_values || []).join('\n')}>{row.po_codigos}</td>}
-                                    {masterVisibleCols.nd && <td className="master-text-col p-3 text-slate-600 font-bold" title={(row.nd_filter_values || []).join('\n')}>{row.nd_codigos}</td>}
                                     {masterVisibleCols.dataInic && <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_inic || "-"}</td>}
                                     {masterVisibleCols.dataFim && <td className="p-3 text-slate-500 font-bold break-words text-center">{row.data_fim || "-"}</td>}
                                     {masterVisibleCols.percTempo && <td className="p-3 align-middle">{row.perc_tempo !== null ? (<div className="flex items-center gap-1"><div className="w-full bg-slate-200 rounded-full h-1.5 flex-1 overflow-hidden"><div className={`h-1.5 rounded-full ${row.perc_tempo >= 1 ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${Math.min(Math.max(row.perc_tempo * 100, 0), 100)}%` }}></div></div><span className="text-[8px] font-bold text-slate-600 min-w-[30px] text-right">{formatPercentBR(row.perc_tempo)}</span></div>) : "-"}</td>}
-                                    {masterVisibleCols.diasPassaram && <td className="p-3 text-center font-bold text-slate-600">{row.dias_passaram !== null ? `${row.dias_passaram} d` : "-"}</td>}
-                                    {masterVisibleCols.encerrandoDias && <td className={`p-3 text-center font-bold ${row.encerrando_dias < 0 ? 'text-red-500' : 'text-emerald-600'}`}>{row.encerrando_dias !== null ? `${row.encerrando_dias} d` : "-"}</td>}
-                                    {masterVisibleCols.difGlobal && <td className={`p-3 text-right font-bold ${row.dif_global < 0 ? 'text-red-500' : (row.dif_global > 0 ? 'text-emerald-600' : 'text-slate-500')} bg-slate-50/30`}>{formatBRL(row.dif_global)}</td>}
+                                    {masterVisibleCols.diasPassaram && <td className="p-3 text-center font-bold text-slate-600">{row.dias_passaram !== null ? (<><div>{row.dias_passaram} d</div><div className="mt-1 text-[8px] font-semibold text-slate-400 normal-case">{formatDurationDays(row.dias_passaram)}</div></>) : "-"}</td>}
+                                    {masterVisibleCols.encerrandoDias && <td className={`p-3 text-center font-bold ${row.encerrando_dias < 0 ? 'text-red-500' : 'text-emerald-600'}`}>{row.encerrando_dias !== null ? (<><div>{row.encerrando_dias} d</div><div className="mt-1 text-[8px] font-semibold opacity-70 normal-case">{formatDurationDays(row.encerrando_dias)}</div></>) : "-"}</td>}
+                                    {masterVisibleCols.ao && <td className="master-code-col p-3 text-slate-600 font-bold" title={(row.ao_filter_values || []).join('\n')}>{row.ao_codigos}</td>}
+                                    {masterVisibleCols.po && <td className="master-code-col p-3 text-slate-600 font-bold" title={(row.po_filter_values || []).join('\n')}>{row.po_codigos}</td>}
+                                    {masterVisibleCols.nd && <td className="master-code-col p-3 text-slate-600 font-bold" title={(row.nd_filter_values || []).join('\n')}>{row.nd_codigos}</td>}
+                                    {masterVisibleCols.difGlobal && <td className={`p-3 text-right font-bold ${row.dif_global < 0 ? 'text-red-500' : (row.dif_global > 0 ? 'text-emerald-600' : 'text-slate-500')} bg-slate-50/30`}>
+                                        {budgetDetails.length > 0 && (
+                                            <button onClick={() => toggleBudgetContract(row.contrato)} className="mb-1 flex w-full items-center justify-end gap-1 text-[8px] font-black text-blue-700 hover:text-blue-900 uppercase" title="Expandir valores financeiros por AO–PO–ND" aria-expanded={budgetExpanded}>
+                                                <span>{budgetExpanded ? '▼' : '▶'}</span> AO–PO–ND
+                                            </button>
+                                        )}
+                                        {formatBRL(row.dif_global)}
+                                    </td>}
                                     {masterVisibleCols.vGlobal && <td className="p-3 text-right font-bold text-slate-700 bg-slate-50/30">{formatBRL(row.v_global)}</td>}
                                     {masterVisibleCols.empenhado && <td className="p-3 text-right font-bold text-blue-700">{formatBRL(row.v_empenhado)}</td>}
                                     {masterVisibleCols.recebido && <td className="p-3 text-right font-bold text-violet-700">{formatBRL(row.v_recebido)}</td>}
@@ -2659,7 +3100,10 @@ Substituto: ${kpis.qtdFiscaisSub}`} color="emerald" isCurrency={false} />
                                     {masterVisibleCols.execLiq && <td className="p-3 text-right font-black text-violet-600">{formatBRL(row.v_pago)}</td>}
                                     {masterVisibleCols.pExecLiq && <td className="p-3 text-center font-black text-violet-800 bg-violet-50/30">{formatPercentBR(row.p_pago)}</td>}
                                 </tr>
-                            ))}
+                                {budgetExpanded && budgetDetails.map((detail, detailIndex) => renderBudgetDetailRow(detail, `${row.contrato}-orc-${detailIndex}`))}
+                                </React.Fragment>
+                                );
+                            })}
                         </tbody>
                         <tfoot className="bg-slate-200 sticky bottom-0 border-t-2 border-slate-400 shadow-md z-10">
                             <tr className="text-slate-800 uppercase font-black">
@@ -2765,7 +3209,7 @@ function App() {
                 <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
                 <div className="bg-white p-8 rounded-2xl shadow-2xl w-[400px] max-w-[90%] border-t-8 border-blue-600 relative z-10">
                     <div className="text-center mb-8">
-                        <h1 className="text-2xl font-black text-slate-800 uppercase tracking-tighter leading-tight">Acesso Restrito</h1>
+                        <h1 className="text-2xl font-black text-red-600 uppercase tracking-tighter leading-tight">Acesso Restrito</h1>
                         <p className="text-xs font-bold text-slate-500 mt-2 uppercase tracking-widest">Painel Geral de Contratos</p>
                     </div>
                     <form onSubmit={handleLogin} className="space-y-5">
@@ -2782,6 +3226,7 @@ function App() {
                             {isLogging ? 'Autenticando...' : 'Autenticar Acesso'}
                         </button>
                     </form>
+                    <p className="mt-6 text-center text-[10px] font-black uppercase tracking-widest text-slate-500">Versão {DASH_VERSION} – Produzido por Cel Brito</p>
                 </div>
             </div>
         );
